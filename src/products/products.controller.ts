@@ -192,7 +192,13 @@ export class ProductsController {
                 isPrimary: true,
               },
             ],
-            category: ['moisturizer', 'face-care'],
+            categories: [
+              {
+                _id: '67741234567890abcdef1111',
+                categoryName: 'Moisturizers',
+                slug: 'moisturizers',
+              },
+            ],
             brand: 'SkinCare Pro',
             price: 299000,
             stock: 100,
@@ -213,7 +219,13 @@ export class ProductsController {
                 isPrimary: true,
               },
             ],
-            category: ['cleanser', 'face-care', 'oil-control'],
+            categories: [
+              {
+                _id: '67741234567890abcdef2222',
+                categoryName: 'Cleansers',
+                slug: 'cleansers',
+              },
+            ],
             brand: 'Clear Skin',
             price: 199000,
             stock: 75,
@@ -260,7 +272,13 @@ export class ProductsController {
           productName: 'Hydrating Daily Moisturizer',
           productDescription:
             'A lightweight, non-greasy moisturizer perfect for daily use.',
-          category: ['moisturizer', 'face-care'],
+          categories: [
+            {
+              _id: '67741234567890abcdef1111',
+              categoryName: 'Moisturizers',
+              slug: 'moisturizers',
+            },
+          ],
           brand: 'SkinCare Pro',
           price: 299000,
           averageRating: 4.5,
