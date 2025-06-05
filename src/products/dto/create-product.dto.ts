@@ -62,10 +62,10 @@ export class CreateProductDto {
   @Type(() => IngredientDto)
   ingredients?: IngredientDto[];
 
+  @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  @IsNotEmpty({ each: true })
-  category: string[];
+  @IsMongoId({ each: true })
+  categories?: string[];
 
   @IsString()
   @IsNotEmpty()

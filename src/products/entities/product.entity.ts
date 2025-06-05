@@ -63,8 +63,8 @@ export class Product {
   @Prop({ type: [IngredientSchema], default: [] })
   ingredients: Ingredient[];
 
-  @Prop({ type: [String], required: true })
-  category: string[];
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Categories' })
+  categories: Types.ObjectId[];
 
   @Prop({ required: true })
   brand: string;
@@ -109,7 +109,7 @@ export const ProductSchema = SchemaFactory.createForClass(Product);
 
 // Add indexes for better performance
 ProductSchema.index({ productName: 'text', productDescription: 'text' });
-ProductSchema.index({ category: 1 });
+ProductSchema.index({ categories: 1 });
 ProductSchema.index({ brand: 1 });
 ProductSchema.index({ suitableFor: 1 });
 ProductSchema.index({ price: 1 });
