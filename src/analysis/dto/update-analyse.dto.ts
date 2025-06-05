@@ -1,13 +1,14 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { CreateAnalyseDto } from './create-analyse.dto';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
-export class UpdateAnalyseDto extends PartialType(CreateAnalyseDto) {
+export class UpdateAnalyseDto {
   @ApiProperty({
     description: 'Updated skin type',
     example: 'normal',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   skinType?: string;
 
   @ApiProperty({
@@ -15,5 +16,7 @@ export class UpdateAnalyseDto extends PartialType(CreateAnalyseDto) {
     example: 'Your skin type is normal with 95.1% confidence',
     required: false,
   })
+  @IsOptional()
+  @IsString()
   result?: string;
 }

@@ -63,7 +63,7 @@ export class Product {
   @Prop({ type: [IngredientSchema], default: [] })
   ingredients: Ingredient[];
 
-  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Categories' })
+  @Prop({ type: [MongooseSchema.Types.ObjectId], ref: 'Category' })
   categories: Types.ObjectId[];
 
   @Prop({ required: true })
