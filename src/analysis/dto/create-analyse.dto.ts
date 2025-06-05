@@ -11,14 +11,6 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class RecommendationDto {
   @ApiProperty({
-    description: 'Unique identifier for this recommendation',
-    example: 'rec-1-1704538200000',
-  })
-  @IsString()
-  @IsNotEmpty()
-  recommendationId: string;
-
-  @ApiProperty({
     description: 'MongoDB ObjectId of the recommended product',
     example: '67741234567890abcdef9999',
   })
@@ -56,8 +48,8 @@ export class CreateAnalyseDto {
 
   @ApiProperty({
     description: 'Detected skin type from AI analysis',
-    example: 'oily',
-    enum: ['oily', 'dry', 'normal'],
+    example: 'Acne',
+    enum: ['Acne', 'Eczema', 'Normal', 'Psoriasis'],
   })
   @IsString()
   @IsNotEmpty()
@@ -72,7 +64,8 @@ export class CreateAnalyseDto {
   result: string;
 
   @ApiProperty({
-    description: 'Array of recommended products based on skin type',
+    description:
+      'Array of recommended products based on skin type (for creation only)',
     type: [RecommendationDto],
     required: false,
   })

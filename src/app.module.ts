@@ -7,6 +7,7 @@ import { ProductsModule } from './products/products.module';
 import { AnalysisModule } from './analysis/analysis.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { CategoriesModule } from './categories/categories.module';
+import { ReviewsModule } from './reviews/reviews.module';
 import { DoctorsModule } from './doctors/doctors.module';
 import { SpecializationsModule } from './specializations/specializations.module';
 
@@ -24,8 +25,6 @@ import { SpecializationsModule } from './specializations/specializations.module'
     AnalysisModule,
     PromotionsModule,
     CategoriesModule,
-    DoctorsModule,
-    SpecializationsModule,
   ],
 })
 export class AppModule {}

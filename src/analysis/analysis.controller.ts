@@ -108,14 +108,24 @@ export class AnalysisController {
           analysisDate: '2025-01-06T10:30:00.000Z',
           recommendedProducts: [
             {
+              _id: '67741234567890abcdef1111',
               recommendationId: 'rec-1-1704538200000',
-              productId: '67741234567890abcdef9999',
+              analysisId: '67741234567890abcdef1234',
+              productId: {
+                _id: '67741234567890abcdef9999',
+                productName: 'Oil Control Cleanser',
+                productImages: [
+                  {
+                    url: 'https://example.com/product1.jpg',
+                    isPrimary: true,
+                  },
+                ],
+                brand: 'SkinCare Pro',
+                price: 250000,
+              },
               reason: 'Suitable for oily skin type - Gentle cleanser',
-            },
-            {
-              recommendationId: 'rec-2-1704538200000',
-              productId: '67741234567890abcdef8888',
-              reason: 'Suitable for oily skin type - Oil-control moisturizer',
+              createdAt: '2025-01-06T10:30:00.000Z',
+              updatedAt: '2025-01-06T10:30:00.000Z',
             },
           ],
           createdAt: '2025-01-06T10:30:00.000Z',
@@ -220,8 +230,15 @@ export class AnalysisController {
             analysisDate: '2025-01-06T10:30:00.000Z',
             recommendedProducts: [
               {
+                _id: '67741234567890abcdef1111',
                 recommendationId: 'rec-1-1704538200000',
-                productId: '67741234567890abcdef9999',
+                analysisId: '67741234567890abcdef1234',
+                productId: {
+                  _id: '67741234567890abcdef9999',
+                  productName: 'Oil Control Cleanser',
+                  brand: 'SkinCare Pro',
+                  price: 250000,
+                },
                 reason: 'Suitable for oily skin type - Gentle cleanser',
               },
             ],
@@ -318,13 +335,6 @@ export class AnalysisController {
       example: {
         skinType: 'normal',
         result: 'Your skin type is normal with 95.1% confidence',
-        recommendedProducts: [
-          {
-            recommendationId: 'rec-1-1704538200000',
-            productId: '67741234567890abcdef9999',
-            reason: 'Suitable for normal skin type - Balanced cleanser',
-          },
-        ],
       },
     },
   })

@@ -3,6 +3,8 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -11,8 +13,13 @@ import * as sharp from 'sharp';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Analysis, AnalysisDocument } from './entities/analysis.entity';
+import {
+  RecommendedProducts,
+  RecommendedProductsDocument,
+} from './entities/recommended-products.entity';
 import { CreateAnalyseDto } from './dto/create-analyse.dto';
 import { UpdateAnalyseDto } from './dto/update-analyse.dto';
+import { ProductsService } from '../products/products.service';
 
 export interface AnalyseResult {
   analyseIndex: number;
@@ -29,13 +36,17 @@ export class AnalysisService {
 
   constructor(
     @InjectModel(Analysis.name) private analysisModel: Model<AnalysisDocument>,
+    @InjectModel(RecommendedProducts.name)
+    private recommendedProductsModel: Model<RecommendedProductsDocument>,
+    @Inject(forwardRef(() => ProductsService))
+    private productsService: ProductsService,
   ) {
     this.modelPath = path.join(
       process.cwd(),
       'models',
       'resnet50_skin_final_1.onnx',
     );
-    this.labels = ['oily', 'dry', 'normal'];
+    this.labels = ['Acne', 'Eczema', 'Normal', 'Psoriasis'];
     this.initModel();
   }
 
@@ -113,14 +124,28 @@ export class AnalysisService {
         skinType: createAnalyseDto.skinType,
         result: createAnalyseDto.result,
         analysisDate: new Date(),
-        recommendedProducts:
-          createAnalyseDto.recommendedProducts?.map((rec) => ({
-            ...rec,
-            productId: new Types.ObjectId(rec.productId),
-          })) || [],
       });
 
-      return await newAnalysis.save();
+      const savedAnalysis = await newAnalysis.save();
+
+      // Save recommended products separately
+      if (
+        createAnalyseDto.recommendedProducts &&
+        createAnalyseDto.recommendedProducts.length > 0
+      ) {
+        const recommendations = createAnalyseDto.recommendedProducts.map(
+          (rec, index) => ({
+            recommendationId: `rec-${index + 1}-${Date.now()}`,
+            analysisId: savedAnalysis._id,
+            productId: new Types.ObjectId(rec.productId),
+            reason: rec.reason,
+          }),
+        );
+
+        await this.recommendedProductsModel.insertMany(recommendations);
+      }
+
+      return savedAnalysis;
     } catch (error) {
       this.logger.error(`Error saving analysis: ${error.message}`);
       throw new BadRequestException(
@@ -131,35 +156,160 @@ export class AnalysisService {
 
   async generateRecommendations(skinType: string): Promise<any[]> {
     try {
-      // Mock recommendations if ProductsService is not available
-      return [
-        {
-          recommendationId: `rec-1-${Date.now()}`,
-          productId: new Types.ObjectId().toString(),
-          reason: `Suitable for ${skinType} skin type - Gentle cleanser`,
-        },
-        {
-          recommendationId: `rec-2-${Date.now()}`,
-          productId: new Types.ObjectId().toString(),
-          reason: `Suitable for ${skinType} skin type - Moisturizer`,
-        },
-        {
-          recommendationId: `rec-3-${Date.now()}`,
-          productId: new Types.ObjectId().toString(),
-          reason: `Suitable for ${skinType} skin type - Serum`,
-        },
-      ];
+      const recommendations: { productId: string; reason: string }[] = [];
+
+      if (this.productsService) {
+        // Get products suitable for the detected skin type
+        const suitableProducts =
+          await this.productsService.getProductsBySkinType(skinType);
+
+        // Also get products from related categories based on skin type
+        const categoryFilters = this.getCategoryFiltersBySkinType(skinType);
+        let categoryProducts: any[] = [];
+
+        for (const category of categoryFilters) {
+          try {
+            const productsResult = await this.productsService.findAll({
+              suitableFor: category,
+            });
+
+            // Handle both array and object with products property
+            let products: any[] = [];
+            if (Array.isArray(productsResult)) {
+              products = productsResult;
+            } else if (
+              productsResult &&
+              typeof productsResult === 'object' &&
+              'products' in productsResult
+            ) {
+              products = (productsResult as any).products || [];
+            } else {
+              products = [];
+            }
+
+            categoryProducts = categoryProducts.concat(products);
+          } catch (error) {
+            this.logger.warn(
+              `Failed to get products for category ${category}: ${error.message}`,
+            );
+          }
+        }
+
+        // Combine and deduplicate products
+        const allProducts = [...(suitableProducts || []), ...categoryProducts];
+        const uniqueProducts = this.deduplicateProducts(allProducts);
+
+        // Sort by rating and limit to top recommendations
+        const sortedProducts = uniqueProducts
+          .filter((product) => product.isActive && product.stock > 0)
+          .sort((a, b) => (b.averageRating || 0) - (a.averageRating || 0))
+          .slice(0, 5); // Limit to top 5 recommendations
+
+        // Generate recommendation reasons based on skin type and product
+        for (const product of sortedProducts) {
+          const reason = this.generateRecommendationReason(skinType, product);
+          recommendations.push({
+            productId: product._id.toString(),
+            reason: reason,
+          });
+        }
+      }
+
+      // Fallback to mock data if no real products found or ProductsService unavailable
+      if (recommendations.length === 0) {
+        this.logger.warn(
+          'No suitable products found, using fallback recommendations',
+        );
+        return this.getFallbackRecommendations(skinType);
+      }
+
+      return recommendations;
     } catch (error) {
       this.logger.error(`Error generating recommendations: ${error.message}`);
-      return [];
+      return this.getFallbackRecommendations(skinType);
     }
+  }
+
+  private getCategoryFiltersBySkinType(skinType: string): string[] {
+    const categoryMap = {
+      Acne: ['acne-prone skin', 'oily skin', 'acne treatment', 'oil control'],
+      Eczema: ['sensitive skin', 'dry skin', 'gentle', 'hypoallergenic'],
+      Normal: ['all skin types', 'normal skin', 'balanced'],
+      Psoriasis: ['sensitive skin', 'dry skin', 'anti-inflammatory', 'gentle'],
+    };
+
+    return categoryMap[skinType] || ['all skin types'];
+  }
+
+  private deduplicateProducts(products: any[]): any[] {
+    const seen = new Set();
+    return products.filter((product) => {
+      const id = product._id.toString();
+      if (seen.has(id)) {
+        return false;
+      }
+      seen.add(id);
+      return true;
+    });
+  }
+
+  private generateRecommendationReason(skinType: string, product: any): string {
+    const reasonTemplates = {
+      Acne: [
+        `Perfect for acne-prone skin - ${product.productName} helps control oil and prevent breakouts`,
+        `Recommended for acne treatment - Contains ingredients that target acne-causing bacteria`,
+        `Ideal for oily and acne-prone skin - Helps reduce inflammation and clear pores`,
+        `Great for acne management - ${product.brand} formulation designed for problematic skin`,
+      ],
+      Eczema: [
+        `Gentle formula suitable for eczema-prone skin - ${product.productName} provides soothing relief`,
+        `Recommended for sensitive skin - Helps calm inflammation and restore skin barrier`,
+        `Perfect for eczema care - Fragrance-free and hypoallergenic formula`,
+        `Ideal for sensitive skin conditions - ${product.brand} dermatologist-tested formula`,
+      ],
+      Normal: [
+        `Perfect for maintaining healthy, normal skin - ${product.productName} provides balanced care`,
+        `Ideal for normal skin maintenance - Helps preserve skin's natural balance`,
+        `Great for daily skincare routine - Suitable for normal skin types`,
+        `Recommended for balanced skin - ${product.brand} formula maintains skin health`,
+      ],
+      Psoriasis: [
+        `Gentle care for psoriasis-prone skin - ${product.productName} helps reduce irritation`,
+        `Recommended for sensitive skin conditions - Anti-inflammatory properties`,
+        `Perfect for psoriasis management - Helps soothe and moisturize affected areas`,
+        `Ideal for sensitive skin - ${product.brand} dermatologically tested for problem skin`,
+      ],
+    };
+
+    const templates = reasonTemplates[skinType] || reasonTemplates['Normal'];
+    const randomTemplate =
+      templates[Math.floor(Math.random() * templates.length)];
+
+    return randomTemplate;
+  }
+
+  private getFallbackRecommendations(skinType: string): any[] {
+    return [
+      {
+        productId: new Types.ObjectId().toString(),
+        reason: `Recommended cleanser for ${skinType} skin type - Gentle daily cleansing`,
+      },
+      {
+        productId: new Types.ObjectId().toString(),
+        reason: `Suitable moisturizer for ${skinType} skin - Provides optimal hydration`,
+      },
+      {
+        productId: new Types.ObjectId().toString(),
+        reason: `Treatment serum for ${skinType} skin concerns - Targeted care`,
+      },
+    ];
   }
 
   async processAndSaveAnalysis(
     imageBuffer: Buffer,
     userId: string,
     imageUrl: string,
-  ): Promise<AnalysisDocument> {
+  ): Promise<any> {
     const { skinType, confidence } = await this.runInference(imageBuffer);
     const recommendations = await this.generateRecommendations(skinType);
 
@@ -171,30 +321,75 @@ export class AnalysisService {
       recommendedProducts: recommendations,
     };
 
-    return this.saveAnalysis(analysisData);
+    const savedAnalysis = await this.saveAnalysis(analysisData);
+
+    // Get the analysis with recommendations - fix type issue
+    return this.getAnalysisWithRecommendations(
+      (savedAnalysis._id as Types.ObjectId).toString(),
+    );
   }
 
-  async findByUserId(userId: string): Promise<AnalysisDocument[]> {
-    return this.analysisModel
+  async getAnalysisWithRecommendations(analysisId: string): Promise<any> {
+    const analysis = await this.analysisModel.findById(analysisId).exec();
+
+    if (!analysis) {
+      throw new NotFoundException(`Analysis with ID ${analysisId} not found`);
+    }
+
+    const recommendations = await this.recommendedProductsModel
+      .find({ analysisId: new Types.ObjectId(analysisId) })
+      .populate('productId', 'productName productImages brand price')
+      .exec();
+
+    return {
+      ...analysis.toObject(),
+      recommendedProducts: recommendations,
+    };
+  }
+
+  async findByUserId(userId: string): Promise<any[]> {
+    const analyses = await this.analysisModel
       .find({ userId: new Types.ObjectId(userId) })
       .sort({ analysisDate: -1 })
       .exec();
+
+    // Get recommendations for each analysis
+    const analysesWithRecommendations = await Promise.all(
+      analyses.map(async (analysis) => {
+        const recommendations = await this.recommendedProductsModel
+          .find({ analysisId: analysis._id })
+          .populate('productId', 'productName productImages brand price')
+          .exec();
+
+        return {
+          ...analysis.toObject(),
+          recommendedProducts: recommendations,
+        };
+      }),
+    );
+
+    return analysesWithRecommendations;
   }
 
-  async findOne(id: string): Promise<AnalysisDocument> {
+  async findOne(id: string): Promise<any> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid analysis ID format');
+    }
+
     const analysis = await this.analysisModel.findById(id).exec();
 
     if (!analysis) {
       throw new NotFoundException(`Analysis with ID ${id} not found`);
     }
 
-    return analysis;
+    return this.getAnalysisWithRecommendations(id);
   }
 
-  async update(
-    id: string,
-    updateAnalyseDto: UpdateAnalyseDto,
-  ): Promise<AnalysisDocument> {
+  async update(id: string, updateAnalyseDto: UpdateAnalyseDto): Promise<any> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid analysis ID format');
+    }
+
     const analysis = await this.analysisModel.findById(id);
 
     if (!analysis) {
@@ -202,20 +397,27 @@ export class AnalysisService {
     }
 
     Object.assign(analysis, updateAnalyseDto);
+    await analysis.save();
 
-    if (updateAnalyseDto.recommendedProducts) {
-      analysis.recommendedProducts = updateAnalyseDto.recommendedProducts.map(
-        (rec) => ({
-          ...rec,
-          productId: new Types.ObjectId(rec.productId),
-        }),
-      );
-    }
-
-    return analysis.save();
+    return this.getAnalysisWithRecommendations(id);
   }
 
   async remove(id: string): Promise<{ deleted: boolean }> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid analysis ID format');
+    }
+
+    const analysis = await this.analysisModel.findById(id);
+    if (!analysis) {
+      throw new NotFoundException(`Analysis with ID ${id} not found`);
+    }
+
+    // Delete related recommendations first
+    await this.recommendedProductsModel.deleteMany({
+      analysisId: new Types.ObjectId(id),
+    });
+
+    // Delete the analysis
     const result = await this.analysisModel.deleteOne({ _id: id });
 
     if (result.deletedCount === 0) {
@@ -223,5 +425,40 @@ export class AnalysisService {
     }
 
     return { deleted: true };
+  }
+
+  // New method to manage recommendations
+  async getRecommendationsByAnalysis(
+    analysisId: string,
+  ): Promise<RecommendedProductsDocument[]> {
+    return this.recommendedProductsModel
+      .find({ analysisId: new Types.ObjectId(analysisId) })
+      .populate('productId', 'productName productImages brand price')
+      .exec();
+  }
+
+  async addRecommendation(
+    analysisId: string,
+    productId: string,
+    reason: string,
+  ): Promise<RecommendedProductsDocument> {
+    const recommendation = new this.recommendedProductsModel({
+      recommendationId: `rec-${Date.now()}`,
+      analysisId: new Types.ObjectId(analysisId),
+      productId: new Types.ObjectId(productId),
+      reason,
+    });
+
+    return recommendation.save();
+  }
+
+  async removeRecommendation(
+    recommendationId: string,
+  ): Promise<{ deleted: boolean }> {
+    const result = await this.recommendedProductsModel.deleteOne({
+      recommendationId,
+    });
+
+    return { deleted: result.deletedCount > 0 };
   }
 }

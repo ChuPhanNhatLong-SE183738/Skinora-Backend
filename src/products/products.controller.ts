@@ -46,11 +46,11 @@ export class ProductsController {
     type: CreateProductDto,
     examples: {
       example1: {
-        summary: 'Moisturizer product',
+        summary: 'Complete product example',
         value: {
           productName: 'Hydrating Daily Moisturizer',
           productDescription:
-            'A lightweight, non-greasy moisturizer perfect for daily use. Provides 24-hour hydration.',
+            'A lightweight, non-greasy moisturizer perfect for daily use. Provides 24-hour hydration with a blend of hyaluronic acid and ceramides.',
           productImages: [
             {
               url: 'https://example.com/products/moisturizer-main.jpg',
@@ -74,13 +74,8 @@ export class ProductsController {
               percentage: 5.0,
               purpose: 'Pore minimizing and oil control',
             },
-            {
-              name: 'Ceramides',
-              percentage: 1.0,
-              purpose: 'Skin barrier repair',
-            },
           ],
-          categories: ['67741234567890abcdef1111', '67741234567890abcdef2222'],
+          categories: ['677412345678abcdef111111', '677412345678abcdef222222'],
           brand: 'SkinCare Pro',
           price: 299000,
           stock: 100,
@@ -89,53 +84,44 @@ export class ProductsController {
           isActive: true,
         },
       },
+      example2: {
+        summary: 'Minimal required fields only',
+        value: {
+          productName: 'Simple Cleanser',
+          productDescription: 'Gentle daily cleanser for all skin types.',
+          brand: 'CleanCo',
+          price: 150000,
+          suitableFor: 'all skin types',
+        },
+      },
     },
   })
   @ApiResponse({
     status: 201,
     description: 'Product created successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Validation failed',
     schema: {
       example: {
-        _id: '67741234567890abcdef3333',
-        productName: 'Hydrating Daily Moisturizer',
-        productDescription:
-          'A lightweight, non-greasy moisturizer perfect for daily use.',
-        productImages: [
-          {
-            url: 'https://example.com/products/moisturizer-main.jpg',
-            alt: 'Hydrating Daily Moisturizer - Main Image',
-            isPrimary: true,
-          },
+        message: [
+          'productName should not be empty',
+          'productName must be a string',
+          'price must be a number',
+          'price must not be less than 0',
         ],
-        ingredients: [
-          {
-            name: 'Hyaluronic Acid',
-            percentage: 2.0,
-            purpose: 'Deep hydration and plumping',
-          },
-        ],
-        categories: [
-          {
-            _id: '67741234567890abcdef1111',
-            name: 'Moisturizer',
-            slug: 'moisturizer',
-          },
-        ],
-        brand: 'SkinCare Pro',
-        price: 299000,
-        stock: 100,
-        suitableFor: 'all skin types',
-        reviews: [],
-        averageRating: 0,
-        totalReviews: 0,
-        isActive: true,
-        createdAt: '2025-01-06T12:00:00.000Z',
-        updatedAt: '2025-01-06T12:00:00.000Z',
+        error: 'Bad Request',
+        statusCode: 400,
       },
     },
   })
-  create(@Body() createProductDto: CreateProductDto) {
-    return this.productsService.create(createProductDto);
+  async create(@Body() createProductDto: CreateProductDto) {
+    try {
+      return await this.productsService.create(createProductDto);
+    } catch (error) {
+      throw error;
+    }
   }
 
   @Get()
@@ -533,67 +519,36 @@ export class ProductsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Add product review',
-    description: 'Add a review and rating for a product',
+    summary: 'Add product review (Deprecated)',
+    description:
+      'Please use POST /reviews endpoint instead. This endpoint redirects to the Reviews API.',
+    deprecated: true,
   })
-  @ApiParam({
-    name: 'id',
-    description: 'MongoDB ObjectId of the product',
-    example: '67741234567890abcdef3333',
-  })
-  @ApiBody({
-    description: 'Review data',
-    type: AddReviewDto,
-    examples: {
-      example1: {
-        summary: 'Product review',
-        value: {
+  @ApiResponse({
+    status: 301,
+    description: 'Redirect to Reviews API',
+    schema: {
+      example: {
+        message: 'Please use POST /reviews endpoint instead',
+        redirectTo: 'POST /reviews',
+        body: {
+          productId: 'product_id_here',
+          content: 'review_content',
           rating: 5,
-          comment:
-            'Amazing moisturizer! My skin feels so soft and hydrated after using it for a week.',
         },
       },
     },
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Review added successfully',
-    schema: {
-      example: {
-        _id: '67741234567890abcdef3333',
-        productName: 'Hydrating Daily Moisturizer',
-        reviews: [
-          {
-            userId: '67741234567890abcdef5678',
-            rating: 5,
-            comment: 'Amazing moisturizer! My skin feels so soft and hydrated.',
-            reviewDate: '2025-01-06T15:30:00.000Z',
-            isVerified: false,
-          },
-        ],
-        averageRating: 4.6,
-        totalReviews: 24,
+  addReview(@Param('id') productId: string) {
+    return {
+      message: 'Please use POST /reviews endpoint instead',
+      redirectTo: 'POST /reviews',
+      body: {
+        productId: productId,
+        content: 'Your review content here',
+        rating: 'Rating from 1-5',
       },
-    },
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad Request - User already reviewed this product',
-    schema: {
-      example: {
-        message: 'User has already reviewed this product',
-        error: 'Bad Request',
-        statusCode: 400,
-      },
-    },
-  })
-  addReview(
-    @Param('id') productId: string,
-    @Body() addReviewDto: AddReviewDto,
-    @Req() req,
-  ) {
-    const userId = req.user.userId || req.user._id || req.user.sub;
-    return this.productsService.addReview(productId, userId, addReviewDto);
+    };
   }
 
   @Patch(':id/stock')

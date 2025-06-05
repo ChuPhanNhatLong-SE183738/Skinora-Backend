@@ -7,7 +7,6 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { AddReviewDto } from './dto/add-review.dto';
 import { Product, ProductDocument } from './entities/product.entity';
 
 @Injectable()
@@ -18,18 +17,19 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto): Promise<ProductDocument> {
     try {
-      const newProduct = new this.productModel({
+      const productData = {
         ...createProductDto,
-        expiryDate: createProductDto.expiryDate
-          ? new Date(createProductDto.expiryDate)
-          : undefined,
+        categories: createProductDto.categories?.map(
+          (id) => new Types.ObjectId(id),
+        ),
         promotionId: createProductDto.promotionId
           ? new Types.ObjectId(createProductDto.promotionId)
           : undefined,
-        categories: createProductDto.categories
-          ? createProductDto.categories.map((cat) => new Types.ObjectId(cat))
-          : [],
-      });
+        stock: createProductDto.stock || 0,
+        isActive: createProductDto.isActive !== false,
+      };
+
+      const newProduct = new this.productModel(productData);
       return await newProduct.save();
     } catch (error) {
       throw new BadRequestException(
@@ -38,29 +38,52 @@ export class ProductsService {
     }
   }
 
-  async findAll(filters?: any): Promise<ProductDocument[]> {
-    const query: any = { isActive: true };
+  async findAll(filters?: any): Promise<any> {
+    try {
+      const query: any = { isActive: true };
 
-    if (filters?.category) {
-      query.categories = { $in: [new Types.ObjectId(filters.category)] };
-    }
-    if (filters?.brand) {
-      query.brand = new RegExp(filters.brand, 'i');
-    }
-    if (filters?.suitableFor) {
-      query.suitableFor = new RegExp(filters.suitableFor, 'i');
-    }
-    if (filters?.minPrice || filters?.maxPrice) {
-      query.price = {};
-      if (filters.minPrice) query.price.$gte = Number(filters.minPrice);
-      if (filters.maxPrice) query.price.$lte = Number(filters.maxPrice);
-    }
+      if (filters?.category) {
+        if (Types.ObjectId.isValid(filters.category)) {
+          query.categories = new Types.ObjectId(filters.category);
+        }
+      }
 
-    return this.productModel
-      .find(query)
-      .populate('promotionId')
-      .populate('categories')
-      .exec();
+      if (filters?.brand) {
+        query.brand = new RegExp(filters.brand, 'i');
+      }
+
+      if (filters?.suitableFor) {
+        query.suitableFor = new RegExp(filters.suitableFor, 'i');
+      }
+
+      if (filters?.minPrice || filters?.maxPrice) {
+        query.price = {};
+        if (filters.minPrice) query.price.$gte = Number(filters.minPrice);
+        if (filters.maxPrice) query.price.$lte = Number(filters.maxPrice);
+      }
+
+      const products = await this.productModel
+        .find(query)
+        .populate('categories')
+        .populate('promotionId')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      return {
+        products,
+        totalCount: products.length,
+        page: 1,
+        limit: products.length,
+      };
+    } catch (error) {
+      console.error('Error in findAll:', error);
+      return {
+        products: [],
+        totalCount: 0,
+        page: 1,
+        limit: 0,
+      };
+    }
   }
 
   async findOne(id: string): Promise<ProductDocument> {
@@ -70,14 +93,14 @@ export class ProductsService {
 
     const product = await this.productModel
       .findById(id)
-      .populate('promotionId')
       .populate('categories')
-      .populate('reviews.userId', 'fullName avatarUrl')
+      .populate('promotionId')
       .exec();
 
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
+
     return product;
   }
 
@@ -89,31 +112,26 @@ export class ProductsService {
       throw new BadRequestException('Invalid product ID format');
     }
 
-    const updateData: any = { ...updateProductDto };
-
-    if (updateProductDto.expiryDate) {
-      updateData.expiryDate = new Date(updateProductDto.expiryDate);
-    }
-
-    if (updateProductDto.promotionId) {
-      updateData.promotionId = new Types.ObjectId(updateProductDto.promotionId);
-    }
-
-    if (updateProductDto.categories) {
-      updateData.categories = updateProductDto.categories.map(
-        (cat) => new Types.ObjectId(cat),
-      );
-    }
+    const updateData = {
+      ...updateProductDto,
+      categories: updateProductDto.categories?.map(
+        (id) => new Types.ObjectId(id),
+      ),
+      promotionId: updateProductDto.promotionId
+        ? new Types.ObjectId(updateProductDto.promotionId)
+        : undefined,
+    };
 
     const product = await this.productModel
       .findByIdAndUpdate(id, updateData, { new: true })
-      .populate('promotionId')
       .populate('categories')
+      .populate('promotionId')
       .exec();
 
     if (!product) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
+
     return product;
   }
 
@@ -126,60 +144,50 @@ export class ProductsService {
     if (result.deletedCount === 0) {
       throw new NotFoundException(`Product with ID ${id} not found`);
     }
+
     return { deleted: true };
   }
 
-  async addReview(
+  // Add method to update product rating from external reviews
+  async updateProductRating(
     productId: string,
-    userId: string,
-    addReviewDto: AddReviewDto,
-  ): Promise<ProductDocument> {
-    if (!Types.ObjectId.isValid(productId)) {
-      throw new BadRequestException('Invalid product ID format');
+    averageRating: number,
+    totalReviews: number,
+  ): Promise<void> {
+    try {
+      if (!Types.ObjectId.isValid(productId)) {
+        throw new BadRequestException('Invalid product ID format');
+      }
+
+      await this.productModel.findByIdAndUpdate(productId, {
+        averageRating: Math.round(averageRating * 10) / 10, // Round to 1 decimal
+        totalReviews,
+      });
+    } catch (error) {
+      console.error('Error updating product rating:', error);
     }
-
-    const product = await this.productModel.findById(productId).exec();
-    if (!product) {
-      throw new NotFoundException(`Product with ID ${productId} not found`);
-    }
-
-    // Check if user already reviewed this product
-    const existingReview = product.reviews.find(
-      (review) => review.userId.toString() === userId,
-    );
-
-    if (existingReview) {
-      throw new BadRequestException('User has already reviewed this product');
-    }
-
-    const newReview = {
-      userId: new Types.ObjectId(userId),
-      rating: addReviewDto.rating,
-      comment: addReviewDto.comment,
-      reviewDate: new Date(),
-      isVerified: false,
-    };
-
-    product.reviews.push(newReview as any);
-    return await product.save();
   }
 
   async searchProducts(searchTerm: string): Promise<ProductDocument[]> {
+    const searchRegex = new RegExp(searchTerm, 'i');
+
     return this.productModel
       .find({
         $and: [
           { isActive: true },
           {
             $or: [
-              { productName: { $regex: searchTerm, $options: 'i' } },
-              { productDescription: { $regex: searchTerm, $options: 'i' } },
-              { brand: { $regex: searchTerm, $options: 'i' } },
+              { productName: { $regex: searchRegex } },
+              { productDescription: { $regex: searchRegex } },
+              { brand: { $regex: searchRegex } },
+              { suitableFor: { $regex: searchRegex } },
             ],
           },
         ],
       })
-      .populate('promotionId')
       .populate('categories')
+      .sort({ averageRating: -1 })
+      .limit(20)
       .exec();
   }
 
@@ -190,53 +198,62 @@ export class ProductsService {
 
     return this.productModel
       .find({
-        categories: { $in: [new Types.ObjectId(categoryId)] },
+        categories: new Types.ObjectId(categoryId),
         isActive: true,
       })
-      .populate('promotionId')
       .populate('categories')
+      .sort({ averageRating: -1 })
       .exec();
   }
 
   async getProductsBySkinType(skinType: string): Promise<ProductDocument[]> {
-    return this.productModel
-      .find({
-        suitableFor: { $regex: skinType, $options: 'i' },
-        isActive: true,
-      })
-      .populate('promotionId')
-      .populate('categories')
-      .exec();
+    try {
+      const skinTypeQuery = new RegExp(skinType, 'i');
+      return this.productModel
+        .find({
+          suitableFor: { $regex: skinTypeQuery },
+          isActive: true,
+          stock: { $gt: 0 },
+        })
+        .populate('categories')
+        .sort({ averageRating: -1 })
+        .limit(10)
+        .exec();
+    } catch (error) {
+      console.error('Error in getProductsBySkinType:', error);
+      return [];
+    }
   }
 
   async getFeaturedProducts(): Promise<ProductDocument[]> {
     return this.productModel
-      .find({ isActive: true })
+      .find({
+        isActive: true,
+        averageRating: { $gte: 4.0 },
+        totalReviews: { $gte: 5 },
+      })
+      .populate('categories')
       .sort({ averageRating: -1, totalReviews: -1 })
       .limit(10)
-      .populate('promotionId')
-      .populate('categories')
       .exec();
   }
 
-  async updateStock(
-    productId: string,
-    quantity: number,
-  ): Promise<ProductDocument> {
-    if (!Types.ObjectId.isValid(productId)) {
+  async updateStock(id: string, quantity: number): Promise<ProductDocument> {
+    if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid product ID format');
     }
 
-    const product = await this.productModel.findById(productId).exec();
+    const product = await this.productModel.findById(id);
     if (!product) {
-      throw new NotFoundException(`Product with ID ${productId} not found`);
+      throw new NotFoundException(`Product with ID ${id} not found`);
     }
 
-    if (product.stock + quantity < 0) {
-      throw new BadRequestException('Insufficient stock');
+    const newStock = product.stock + quantity;
+    if (newStock < 0) {
+      throw new BadRequestException('Stock cannot be negative');
     }
 
-    product.stock += quantity;
+    product.stock = newStock;
     return await product.save();
   }
 }
