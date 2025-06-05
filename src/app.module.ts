@@ -25,6 +25,9 @@ import { SpecializationsModule } from './specializations/specializations.module'
     AnalysisModule,
     PromotionsModule,
     CategoriesModule,
+    ReviewsModule,
+    DoctorsModule,
+    SpecializationsModule,
   ],
 })
 export class AppModule {}
