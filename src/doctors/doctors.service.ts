@@ -1,26 +1,105 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
+import { Doctor, DoctorDocument } from './entities/doctor.entity';
+import { processWeeklyAvailability } from './utils/availability.util';
 
 @Injectable()
 export class DoctorsService {
-  create(createDoctorDto: CreateDoctorDto) {
-    return 'This action adds a new doctor';
+  constructor(
+    @InjectModel(Doctor.name) private doctorModel: Model<DoctorDocument>
+  ) { }
+
+  async create(createDoctorDto: CreateDoctorDto) {
+    try {
+      if (createDoctorDto.availability) {
+        createDoctorDto.availability = processWeeklyAvailability(createDoctorDto.availability);
+      }
+
+      const newDoctor = new this.doctorModel(createDoctorDto);
+      return await newDoctor.save();
+    } catch (error) {
+      throw new BadRequestException(`Failed to create doctor: ${error.message}`);
+    }
   }
 
-  findAll() {
-    return `This action returns all doctors`;
+  async findAll() {
+  return this.doctorModel.find({ isActive: true })
+    .populate('specializations')
+    .exec();
+}
+
+  async findOne(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid doctor ID format');
+    }
+
+    const doctor = await this.doctorModel.findById(id)
+      .populate('specializations')
+      .exec();
+    if (!doctor) {
+      throw new NotFoundException(`Doctor with ID ${id} not found`);
+    }
+
+    return doctor;
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} doctor`;
+
+  async update(id: string, updateDoctorDto: UpdateDoctorDto) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid doctor ID format');
+    }
+
+    if (updateDoctorDto.availability) {
+      updateDoctorDto.availability = processWeeklyAvailability(updateDoctorDto.availability);
+    }
+
+    const doctor = await this.doctorModel
+      .findByIdAndUpdate(id, updateDoctorDto, { new: true })
+      .exec();
+
+    if (!doctor) {
+      throw new NotFoundException(`Doctor with ID ${id} not found`);
+    }
+
+    return doctor;
   }
 
-  update(id: number, updateDoctorDto: UpdateDoctorDto) {
-    return `This action updates a #${id} doctor`;
+  async remove(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid doctor ID format');
+    }
+
+    const result = await this.doctorModel.findByIdAndDelete(id).exec();
+
+    if (!result) {
+      throw new NotFoundException(`Doctor with ID ${id} not found`);
+    }
+
+    return { deleted: true };
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} doctor`;
+  async updateAvailability(id: string, availability: any) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid doctor ID format');
+    }
+
+    const processedAvailability = processWeeklyAvailability(availability);
+
+    const doctor = await this.doctorModel
+      .findByIdAndUpdate(
+        id,
+        { availability: processedAvailability },
+        { new: true }
+      )
+      .exec();
+
+    if (!doctor) {
+      throw new NotFoundException(`Doctor with ID ${id} not found`);
+    }
+
+    return doctor;
   }
 }
