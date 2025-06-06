@@ -33,8 +33,8 @@ async function bootstrap() {
 
   app.enableCors({
     origin:
-      process.env.FRONTEND_URL ||
-      'http://localhost:3000' ||
+      // process.env.FRONTEND_URL ||
+      // 'http://localhost:3000' ||
       'http://localhost:8081',
     credentials: true,
   });
