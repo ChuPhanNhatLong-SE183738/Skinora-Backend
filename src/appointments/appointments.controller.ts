@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Query,
+  Request,
+} from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -6,7 +17,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../users/enums/role.enum';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 
 @ApiTags('appointments')
 @ApiBearerAuth()
@@ -18,11 +29,12 @@ export class AppointmentsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN, Role.DOCTOR)
   async create(@Body() createAppointmentDto: CreateAppointmentDto) {
-    const appointment = await this.appointmentsService.create(createAppointmentDto);
+    const appointment =
+      await this.appointmentsService.create(createAppointmentDto);
     return {
       success: true,
       message: 'Appointment scheduled successfully',
-      data: appointment
+      data: appointment,
     };
   }
 
@@ -34,7 +46,7 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'Appointments retrieved successfully',
-      data: appointments
+      data: appointments,
     };
   }
 
@@ -46,7 +58,7 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'User appointments retrieved successfully',
-      data: appointments
+      data: appointments,
     };
   }
 
@@ -58,20 +70,23 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'Doctor appointments retrieved successfully',
-      data: appointments
+      data: appointments,
     };
   }
 
   @Get('availability/:doctorId')
   async checkAvailability(
-    @Param('doctorId') doctorId: string, 
-    @Query('date') date: string
+    @Param('doctorId') doctorId: string,
+    @Query('date') date: string,
   ) {
-    const availability = await this.appointmentsService.checkDoctorAvailability(doctorId, date);
+    const availability = await this.appointmentsService.checkDoctorAvailability(
+      doctorId,
+      date,
+    );
     return {
       success: true,
       message: 'Doctor availability retrieved successfully',
-      data: availability
+      data: availability,
     };
   }
 
@@ -82,19 +97,25 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'Appointment retrieved successfully',
-      data: appointment
+      data: appointment,
     };
   }
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DOCTOR, Role.ADMIN)
-  async update(@Param('id') id: string, @Body() updateAppointmentDto: UpdateAppointmentDto) {
-    const appointment = await this.appointmentsService.update(id, updateAppointmentDto);
+  async update(
+    @Param('id') id: string,
+    @Body() updateAppointmentDto: UpdateAppointmentDto,
+  ) {
+    const appointment = await this.appointmentsService.update(
+      id,
+      updateAppointmentDto,
+    );
     return {
       success: true,
       message: 'Appointment updated successfully',
-      data: appointment
+      data: appointment,
     };
   }
 
@@ -106,7 +127,7 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'Appointment cancelled successfully',
-      data: appointment
+      data: appointment,
     };
   }
 
@@ -118,7 +139,80 @@ export class AppointmentsController {
     return {
       success: true,
       message: 'Appointment deleted successfully',
-      data: result
+      data: result,
     };
+  }
+
+  @Post(':id/start-call')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Start video call for appointment (Patient or Doctor)',
+  })
+  async startVideoCallFromAppointment(
+    @Param('id') appointmentId: string,
+    @Request() req,
+    @Body() body: { callType?: 'video' | 'voice' },
+  ) {
+    console.log('=== START CALL REQUEST ===');
+    console.log('appointmentId from params:', appointmentId);
+    console.log('req.user:', req.user);
+    console.log('body:', body);
+    console.log('========================');
+
+    try {
+      const userId = req.user.sub || req.user.id;
+      const callType = body.callType || 'video';
+
+      console.log('Extracted userId:', userId);
+      console.log('Extracted callType:', callType);
+
+      const result =
+        await this.appointmentsService.startVideoCallFromAppointment(
+          appointmentId,
+          userId,
+          callType,
+        );
+
+      console.log('Service result:', result);
+
+      return {
+        success: true,
+        message: 'Video call initiated successfully',
+        data: result,
+      };
+    } catch (error) {
+      console.error('Controller error:', error);
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post(':id/join-call')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Join existing video call for appointment' })
+  async joinVideoCall(@Param('id') appointmentId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      const result = await this.appointmentsService.joinVideoCall(
+        appointmentId,
+        userId,
+      );
+
+      return {
+        success: true,
+        message: 'Ready to join video call',
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
   }
 }

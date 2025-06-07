@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
@@ -9,43 +13,60 @@ import { processWeeklyAvailability } from './utils/availability.util';
 @Injectable()
 export class DoctorsService {
   constructor(
-    @InjectModel(Doctor.name) private doctorModel: Model<DoctorDocument>
-  ) { }
+    @InjectModel(Doctor.name) private doctorModel: Model<DoctorDocument>,
+  ) {}
 
   async create(createDoctorDto: CreateDoctorDto) {
     try {
       if (createDoctorDto.availability) {
-        createDoctorDto.availability = processWeeklyAvailability(createDoctorDto.availability);
+        createDoctorDto.availability = processWeeklyAvailability(
+          createDoctorDto.availability,
+        );
       }
 
       const newDoctor = new this.doctorModel(createDoctorDto);
       return await newDoctor.save();
     } catch (error) {
-      throw new BadRequestException(`Failed to create doctor: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to create doctor: ${error.message}`,
+      );
     }
   }
 
   async findAll() {
-  return this.doctorModel.find({ isActive: true })
-    .populate('specializations')
-    .exec();
-}
+    return this.doctorModel
+      .find({ isActive: true })
+      .populate('specializations')
+      .exec();
+  }
 
   async findOne(id: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid doctor ID format');
     }
 
-    const doctor = await this.doctorModel.findById(id)
+    const doctor = await this.doctorModel
+      .findById(id)
       .populate('specializations')
       .exec();
     if (!doctor) {
       throw new NotFoundException(`Doctor with ID ${id} not found`);
     }
 
+    const excludedFields = [
+      'password',
+      'skinAnalysisHistory',
+      'purchaseHistory',
+    ];
+
+    excludedFields.forEach((field) => {
+      if (doctor[field]) {
+        doctor[field] = undefined; // Exclude sensitive fields
+      }
+    });
+
     return doctor;
   }
-
 
   async update(id: string, updateDoctorDto: UpdateDoctorDto) {
     if (!Types.ObjectId.isValid(id)) {
@@ -53,7 +74,9 @@ export class DoctorsService {
     }
 
     if (updateDoctorDto.availability) {
-      updateDoctorDto.availability = processWeeklyAvailability(updateDoctorDto.availability);
+      updateDoctorDto.availability = processWeeklyAvailability(
+        updateDoctorDto.availability,
+      );
     }
 
     const doctor = await this.doctorModel
@@ -92,7 +115,7 @@ export class DoctorsService {
       .findByIdAndUpdate(
         id,
         { availability: processedAvailability },
-        { new: true }
+        { new: true },
       )
       .exec();
 

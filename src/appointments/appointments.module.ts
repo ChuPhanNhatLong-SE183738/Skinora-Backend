@@ -7,18 +7,21 @@ import { Appointment, AppointmentSchema } from './entities/appointment.entity';
 import { DoctorsModule } from '../doctors/doctors.module';
 import { UsersModule } from '../users/users.module';
 import { GoogleCalendarService } from './services/google-calendar.service';
+import { CallModule } from '../call/call.module';
+import { AgoraService } from '../call/agora.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: Appointment.name, schema: AppointmentSchema }
+      { name: Appointment.name, schema: AppointmentSchema },
     ]),
     DoctorsModule,
     ConfigModule,
-    UsersModule
+    UsersModule,
+    CallModule,
   ],
   controllers: [AppointmentsController],
-  providers: [AppointmentsService, GoogleCalendarService],
-  exports: [AppointmentsService]
+  providers: [AppointmentsService, GoogleCalendarService, AgoraService],
+  exports: [AppointmentsService],
 })
 export class AppointmentsModule {}
