@@ -41,7 +41,9 @@
     "passport-local": "^1.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sharp": "^0.34.2"
+    "sharp": "^0.34.2",
+    "@payos/node": "^1.0.6",
+    "axios": "^1.6.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

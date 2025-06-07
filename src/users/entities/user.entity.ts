@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 import { Role } from '../enums/role.enum';
 
 export type UserDocument = User & Document;
@@ -47,6 +47,9 @@ export class User {
 
   @Prop({ type: Date, default: Date.now })
   updatedAt: Date;
+
+  @Prop({ type: Types.ObjectId, ref: 'Subscription' })
+  currentSubscription: Types.ObjectId;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

@@ -44,7 +44,17 @@ export class UsersService {
   }
 
   async findOne(id: string): Promise<UserDocument> {
-    const user = await this.userModel.findById(id).select('-password').exec();
+    const user = await this.userModel
+      .findById(id)
+      .select('-password')
+      .populate({
+        path: 'currentSubscription',
+        populate: {
+          path: 'planId',
+          model: 'SubscriptionPlan',
+        },
+      })
+      .exec();
     if (!user) {
       throw new NotFoundException('User not found');
     }
