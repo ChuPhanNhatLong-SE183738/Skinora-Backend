@@ -14,12 +14,12 @@ import { Doctor, DoctorSchema } from '../doctors/entities/doctor.entity';
     MongooseModule.forFeature([
       { name: Call.name, schema: CallSchema },
       { name: User.name, schema: UserSchema },
-      { name: Doctor.name, schema: DoctorSchema }, // Add Doctor schema
+      { name: Doctor.name, schema: DoctorSchema },
     ]),
-    SubscriptionModule,
+    SubscriptionModule, // Import SubscriptionModule for SubscriptionService
   ],
   controllers: [CallController],
-  providers: [CallService, CallGateway, AgoraService],
-  exports: [CallService],
+  providers: [CallService, AgoraService],
+  exports: [CallService, AgoraService],
 })
 export class CallModule {}

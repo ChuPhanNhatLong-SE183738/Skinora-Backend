@@ -17,7 +17,12 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../users/enums/role.enum';
-import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+} from '@nestjs/swagger';
 
 @ApiTags('appointments')
 @ApiBearerAuth()
@@ -192,12 +197,10 @@ export class AppointmentsController {
 
   @Post(':id/join-call')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Join existing video call for appointment' })
   async joinVideoCall(@Param('id') appointmentId: string, @Request() req) {
     try {
       const userId = req.user.sub || req.user.id;
-
       const result = await this.appointmentsService.joinVideoCall(
         appointmentId,
         userId,
@@ -205,7 +208,68 @@ export class AppointmentsController {
 
       return {
         success: true,
-        message: 'Ready to join video call',
+        message: 'Joined video call successfully',
+        data: result,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post(':id/end-call')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'End video call for appointment' })
+  @ApiResponse({
+    status: 200,
+    description: 'Call ended successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Call ended successfully',
+        data: {
+          callId: '675...',
+          duration: 1800, // seconds
+          endTime: '2025-01-06T13:30:00.000Z',
+          status: 'ended',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request',
+    schema: {
+      example: {
+        success: false,
+        message: 'Error message here',
+      },
+    },
+  })
+  async endVideoCall(
+    @Param('id') appointmentId: string,
+    @Request() req: { user: { sub?: string; id?: string } },
+  ) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      if (!userId) {
+        return {
+          success: false,
+          message: 'User ID not found in token',
+        };
+      }
+
+      const result = await this.appointmentsService.endVideoCall(
+        appointmentId,
+        userId,
+      );
+
+      return {
+        success: true,
+        message: 'Call ended successfully',
         data: result,
       };
     } catch (error) {

@@ -424,13 +424,10 @@ export class AppointmentsService {
       this.logger.error(
         `Invalid user ID format - patientId: ${patientId}, doctorId: ${doctorId}`,
       );
-      this.logger.error(
-        `Patient ID valid: ${Types.ObjectId.isValid(patientId)}, Doctor ID valid: ${Types.ObjectId.isValid(doctorId)}`,
-      );
       throw new BadRequestException('Invalid user ID format in appointment');
     }
 
-    // Determine user role for response (fallback to patient if not found)
+    // Determine user role
     const isPatient = patientId === userId;
     const isDoctor = doctorId === userId;
     const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'patient';
@@ -440,13 +437,15 @@ export class AppointmentsService {
     );
 
     try {
-      // Initiate call using CallService
+      // Always use actual patientId and doctorId from appointment
+      // Pass a flag to indicate if doctor initiated the call
       this.logger.log(`Initiating call with CallService...`);
-      const callResult = await this.callService.initiateCall(
+      const callResult = await this.callService.initiateCallWithRole(
         patientId,
         doctorId,
         callType,
         appointmentId,
+        isDoctor, // Pass flag to indicate if doctor initiated
       );
 
       this.logger.log(`Call initiated successfully:`, callResult);
@@ -468,7 +467,7 @@ export class AppointmentsService {
         },
         userRole,
         initiatedBy: userId,
-        message: `Video call initiated for appointment - Testing Mode`,
+        message: `Video call initiated for appointment - ${isDoctor ? 'Doctor Mode' : 'Patient Mode'}`,
       };
     } catch (error) {
       this.logger.error(`Error in startVideoCallFromAppointment:`, error);
@@ -490,8 +489,17 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    if (!appointment.callId) {
-      throw new BadRequestException('No active call for this appointment');
+    // Find call by appointmentId in calls table
+    const call = await this.callService.getCallByAppointmentId(appointmentId);
+
+    if (!call) {
+      throw new BadRequestException(
+        'No active call found for this appointment',
+      );
+    }
+
+    if (call.status === 'ended') {
+      throw new BadRequestException('Call has already ended');
     }
 
     // TODO: Add back authorization check later
@@ -499,15 +507,6 @@ export class AppointmentsService {
     const isPatient = appointment.userId.toString() === userId;
     const isDoctor = appointment.doctorId.toString() === userId;
     const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'tester';
-
-    // Get call details
-    const call = await this.callService.getCallById(
-      appointment.callId.toString(),
-    );
-
-    if (call.status === 'ended') {
-      throw new BadRequestException('Call has already ended');
-    }
 
     // Generate new token for joining user
     const uid = Math.floor(Math.random() * 100000) + 1;
@@ -529,5 +528,74 @@ export class AppointmentsService {
       },
       message: 'Ready to join video call - Testing Mode',
     };
+  }
+
+  async endVideoCall(appointmentId: string, userId: string) {
+    this.logger.log(
+      `Ending video call - appointmentId: ${appointmentId}, userId: ${userId}`,
+    );
+
+    // Validate appointmentId format
+    if (!Types.ObjectId.isValid(appointmentId)) {
+      throw new BadRequestException('Invalid appointment ID format');
+    }
+
+    const appointment = await this.appointmentModel
+      .findById(appointmentId)
+      .exec();
+
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found');
+    }
+
+    if (!appointment.callId) {
+      throw new BadRequestException(
+        'No active call found for this appointment',
+      );
+    }
+
+    // Verify user has permission to end the call
+    const isPatient = appointment.userId.toString() === userId;
+    const isDoctor = appointment.doctorId.toString() === userId;
+
+    if (!isPatient && !isDoctor) {
+      throw new BadRequestException('You are not authorized to end this call');
+    }
+
+    try {
+      // End the call using CallService
+      const callResult = await this.callService.endCall(
+        appointment.callId.toString(),
+        userId,
+      );
+
+      if (!callResult) {
+        throw new BadRequestException('Failed to end call');
+      }
+
+      this.logger.log(`Call ended successfully:`, callResult);
+
+      // Update appointment status to completed
+      await this.appointmentModel.findByIdAndUpdate(appointmentId, {
+        appointmentStatus: 'completed',
+      });
+
+      return {
+        callId: callResult._id,
+        duration: callResult.duration,
+        endTime: callResult.endTime,
+        status: callResult.status,
+        appointment: {
+          id: appointment._id,
+          status: 'completed',
+        },
+        endedBy: userId,
+        userRole: isPatient ? 'patient' : 'doctor',
+        message: 'Call ended successfully',
+      };
+    } catch (error) {
+      this.logger.error(`Error ending call:`, error);
+      throw error;
+    }
   }
 }

@@ -32,10 +32,10 @@ export class Call {
   @Prop()
   startTime: Date;
 
-  @Prop()
+  @Prop({ type: Date })
   endTime: Date;
 
-  @Prop()
+  @Prop({ type: Number, default: 0 })
   duration: number; // in seconds
 
   @Prop()
@@ -43,6 +43,9 @@ export class Call {
 
   @Prop({ type: Types.ObjectId, ref: 'Subscription' })
   subscriptionId: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId })
+  endedBy: Types.ObjectId; // userId who ended the call
 }
 
 export const CallSchema = SchemaFactory.createForClass(Call);

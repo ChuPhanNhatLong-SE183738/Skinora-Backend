@@ -1,22 +1,37 @@
-import { IsString, IsEnum, IsOptional, IsMongoId } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsMongoId,
+  IsNotEmpty,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class InitiateCallDto {
-  @ApiProperty({ description: 'Doctor user ID' })
-  @IsMongoId()
+  @ApiProperty({ description: 'Patient ID who will receive the call' })
+  @IsString()
+  @IsNotEmpty()
+  patientId: string;
+
+  @ApiProperty({ description: 'Doctor ID who will make the call' })
+  @IsString()
+  @IsNotEmpty()
   doctorId: string;
 
   @ApiProperty({
-    description: 'Type of call',
+    description: 'Type of call - video or voice',
     enum: ['video', 'voice'],
     default: 'video',
   })
   @IsEnum(['video', 'voice'])
   callType: 'video' | 'voice';
 
-  @ApiProperty({ description: 'Appointment ID (optional)', required: false })
+  @ApiProperty({
+    description: 'Associated appointment ID (optional)',
+    required: false,
+  })
   @IsOptional()
-  @IsMongoId()
+  @IsString()
   appointmentId?: string;
 }
 
