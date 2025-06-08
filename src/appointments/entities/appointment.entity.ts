@@ -19,13 +19,6 @@ export class Appointment {
   callId: Types.ObjectId;
 
   @Prop({
-    type: MongooseSchema.Types.ObjectId,
-    ref: 'Payment',
-    required: false,
-  })
-  paymentId: Types.ObjectId;
-
-  @Prop({
     type: String,
     required: true,
     enum: ['scheduled', 'completed', 'cancelled'],
