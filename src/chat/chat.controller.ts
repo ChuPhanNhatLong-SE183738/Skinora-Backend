@@ -124,29 +124,15 @@ export class ChatController {
     },
   })
   async getChatRooms(@Request() req) {
-    try {
-      const userId = req.user.sub || req.user.id;
-      const userType = req.user.role === 'doctor' ? 'doctor' : 'patient';
+    const userId = req.user.sub || req.user.id;
+    const userType = req.user.role === 'doctor' ? 'doctor' : 'patient'; // <- Auto detect
 
-      this.logger.log(`📥 GET /chat/rooms - User: ${userId} (${userType})`);
-
-      const chatRooms = await this.chatService.getChatRooms(userId, userType);
-
-      this.logger.log(
-        `✅ Found ${chatRooms.length} chat rooms for user ${userId}`,
-      );
-      return {
-        success: true,
-        message: 'Chat rooms retrieved successfully',
-        data: chatRooms,
-      };
-    } catch (error) {
-      this.logger.error(`❌ Error getting chat rooms: ${error.message}`);
-      return {
-        success: false,
-        message: error.message,
-      };
-    }
+    const chatRooms = await this.chatService.getChatRooms(userId, userType);
+    return {
+      success: true,
+      message: 'Chat rooms retrieved successfully',
+      data: chatRooms,
+    };
   }
 
   @Get('rooms/:roomId')
