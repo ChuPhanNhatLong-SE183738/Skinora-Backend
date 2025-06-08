@@ -32,16 +32,21 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin:
-      // process.env.FRONTEND_URL ||
-      // 'http://localhost:3000' ||
-      'http://localhost:8081',
+    origin: '*', // Allow all origins
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
   // Request logging to help debug auth issues
   app.use((req, res, next) => {
     Logger.log(`${req.method} ${req.url}`, 'Request');
+    if (req.headers.authorization) {
+      Logger.debug(
+        `Auth header: ${req.headers.authorization.substring(0, 20)}...`,
+        'Auth',
+      );
+    }
     next();
   });
 

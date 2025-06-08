@@ -3,7 +3,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from 'src/users/users.service';
-import { ObjectId } from 'mongodb';
+import { DoctorsService } from '../../doctors/doctors.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -12,6 +12,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    private readonly doctorsService: DoctorsService, // Add DoctorsService
   ) {
     const secretKey = configService.get<string>('JWT_SECRET');
     if (!secretKey) {
@@ -41,31 +42,57 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Check for email in payload since sub might not be available
       if (!payload || (!payload.sub && !payload.email)) {
         this.logger.warn('JWT payload is missing both sub and email');
-        throw new UnauthorizedException('Invalid token: missing user identifier');
+        throw new UnauthorizedException(
+          'Invalid token: missing user identifier',
+        );
+      }
+
+      // Handle doctor tokens
+      if (payload.role === 'doctor') {
+        try {
+          const doctor = await this.doctorsService.validateDoctorToken(
+            payload.sub,
+          );
+          return {
+            sub: payload.sub,
+            email: payload.email,
+            role: 'doctor',
+            doctorId: payload.doctorId,
+            fullName: payload.fullName,
+            doctor: doctor,
+          };
+        } catch (error) {
+          console.error('Doctor validation failed:', error.message);
+          throw new UnauthorizedException('Invalid doctor token');
+        }
       }
 
       let user;
-      
+
       // Try to find the user by sub (ID) first if it exists
       if (payload.sub) {
         try {
           user = await this.usersService.findOne(payload.sub);
         } catch (error) {
-          this.logger.warn(`Could not find user with ID ${payload.sub}: ${error.message}`);
+          this.logger.warn(
+            `Could not find user with ID ${payload.sub}: ${error.message}`,
+          );
           // Fall back to email lookup if ID lookup fails
         }
       }
-      
+
       // If no user found by ID or no sub provided, try email
       if (!user && payload.email) {
         try {
           user = await this.usersService.findByEmail(payload.email);
         } catch (error) {
-          this.logger.warn(`Could not find user with email ${payload.email}: ${error.message}`);
+          this.logger.warn(
+            `Could not find user with email ${payload.email}: ${error.message}`,
+          );
           throw new UnauthorizedException('User not found');
         }
       }
-      
+
       if (!user) {
         this.logger.warn('User not found with provided credentials');
         throw new UnauthorizedException('User not found');
