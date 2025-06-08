@@ -16,6 +16,7 @@ import { DoctorsService } from '../doctors/doctors.service';
 import { UsersService } from '../users/users.service';
 import { CallService } from '../call/call.service';
 import { AgoraService } from '../call/agora.service';
+import { ChatService } from '../chat/chat.service';
 
 @Injectable()
 export class AppointmentsService {
@@ -27,7 +28,8 @@ export class AppointmentsService {
     private doctorsService: DoctorsService,
     private usersService: UsersService,
     private callService: CallService,
-    private agoraService: AgoraService, // Add AgoraService injection
+    private agoraService: AgoraService,
+    private chatService: ChatService, // Add ChatService injection
   ) {}
 
   async create(createAppointmentDto: CreateAppointmentDto) {
@@ -104,6 +106,22 @@ export class AppointmentsService {
       this.logger.log(
         `Appointment created successfully with ID: ${savedAppointment._id}`,
       );
+
+      // Auto-create chat room for the appointment
+      try {
+        await this.chatService.createChatRoom({
+          patientId: createAppointmentDto.userId,
+          doctorId: createAppointmentDto.doctorId,
+          appointmentId: savedAppointment._id.toString(),
+        });
+        this.logger.log(
+          `Chat room created for appointment ${savedAppointment._id}`,
+        );
+      } catch (chatError) {
+        this.logger.warn(`Failed to create chat room: ${chatError.message}`);
+        // Don't fail appointment creation if chat room fails
+      }
+
       return savedAppointment;
     } catch (error) {
       this.logger.error(`Failed to save appointment: ${error.message}`);

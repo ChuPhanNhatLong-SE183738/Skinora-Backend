@@ -9,6 +9,7 @@ import { UsersModule } from '../users/users.module';
 import { GoogleCalendarService } from './services/google-calendar.service';
 import { CallModule } from '../call/call.module';
 import { AgoraService } from '../call/agora.service';
+import { ChatModule } from '../chat/chat.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AgoraService } from '../call/agora.service';
     ConfigModule,
     UsersModule,
     CallModule,
+    ChatModule,
   ],
   controllers: [AppointmentsController],
   providers: [AppointmentsService, GoogleCalendarService, AgoraService],

@@ -11,10 +11,11 @@ import { ReviewsModule } from './reviews/reviews.module';
 import { DoctorsModule } from './doctors/doctors.module';
 import { SpecializationsModule } from './specializations/specializations.module';
 import { AppointmentsModule } from './appointments/appointments.module';
-import { ChatHistoryModule } from './chat_history/chat_history.module';
-import { ChatMessagesModule } from './chat_messages/chat_messages.module';
 import { SubscriptionModule } from './subscription/subscription.module';
 import { PaymentModule } from './payment/payment.module';
+import { ChatModule } from './chat/chat.module';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 @Module({
   imports: [
@@ -34,10 +35,13 @@ import { PaymentModule } from './payment/payment.module';
     DoctorsModule,
     SpecializationsModule,
     AppointmentsModule,
-    ChatHistoryModule,
-    ChatMessagesModule,
     SubscriptionModule,
     PaymentModule,
+    ChatModule,
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'uploads'),
+      serveRoot: '/uploads',
+    }),
   ],
 })
 export class AppModule {}
