@@ -22,9 +22,4 @@ export class CreateAppointmentDto {
   @IsNotEmpty()
   @IsString()
   timeSlot: string;
-
-  @ApiProperty({ description: 'Payment ID', example: '60d21b4667d0d8992e610c87' })
-  @IsOptional()
-  @IsMongoId()
-  paymentId?: string;
 }

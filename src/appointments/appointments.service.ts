@@ -17,6 +17,7 @@ import { UsersService } from '../users/users.service';
 import { CallService } from '../call/call.service';
 import { AgoraService } from '../call/agora.service';
 import { ChatService } from '../chat/chat.service';
+import { SubscriptionService } from '../subscription/subscription.service'; // Add this import
 
 @Injectable()
 export class AppointmentsService {
@@ -29,12 +30,72 @@ export class AppointmentsService {
     private usersService: UsersService,
     private callService: CallService,
     private agoraService: AgoraService,
-    private chatService: ChatService, // Add ChatService injection
+    private chatService: ChatService,
+    private subscriptionService: SubscriptionService, // Add this injection
   ) {}
+
+  /**
+   * Verify if user has an active subscription with available meetings
+   */
+  async verifyUserSubscription(userId: string): Promise<string> {
+    this.logger.log(`Verifying subscription for user: ${userId}`);
+    
+    // Get current subscription
+    const subscription = await this.subscriptionService.getCurrentSubscription(userId);
+    
+    // Check if subscription exists and is active
+    if (!subscription) {
+      this.logger.warn(`No active subscription found for user ${userId}`);
+      throw new BadRequestException('You need an active subscription to book appointments with doctors');
+    }
+    
+    // Check if user has meetings left in their subscription
+    if (subscription.meetingsUsed >= subscription.meetingAmount) {
+      this.logger.warn(`User ${userId} has used all meetings in subscription (${subscription.meetingsUsed}/${subscription.meetingAmount})`);
+      throw new BadRequestException(`You have used all meetings in your current subscription (${subscription.meetingsUsed}/${subscription.meetingAmount}). Please upgrade your plan.`);
+    }
+    
+    this.logger.log(`User ${userId} has a valid subscription with ${subscription.meetingAmount - subscription.meetingsUsed} meetings left`);
+    return (subscription as any)._id.toString(); // Return the subscription ID for later use
+  }
+
+  /**
+   * Verify if appointment time is valid (not in the past)
+   */
+  private verifyAppointmentTime(date: string, timeSlot: string): void {
+    this.logger.log(`Verifying appointment time: ${date} ${timeSlot}`);
+    
+    const [hours, minutes] = timeSlot.split(':').map((num) => parseInt(num, 10));
+    const appointmentDateTime = new Date(date);
+    appointmentDateTime.setHours(hours, minutes, 0, 0);
+    
+    const now = new Date();
+    
+    // Add a small buffer (e.g., 5 minutes) to prevent issues when appointment time is very close to current time
+    const bufferMinutes = 5;
+    const minimumValidTime = new Date();
+    minimumValidTime.setMinutes(now.getMinutes() + bufferMinutes);
+    
+    if (appointmentDateTime < minimumValidTime) {
+      const formattedApptTime = appointmentDateTime.toLocaleString();
+      const formattedNow = now.toLocaleString();
+      this.logger.warn(`Appointment time ${formattedApptTime} is in the past (current time: ${formattedNow})`);
+      throw new BadRequestException(`Cannot book appointments in the past or less than ${bufferMinutes} minutes from now. Selected time: ${formattedApptTime}, Current time: ${formattedNow}`);
+    }
+    
+    this.logger.log(`Appointment time validation passed for ${date} ${timeSlot}`);
+  }
 
   async create(createAppointmentDto: CreateAppointmentDto) {
     const { userId, doctorId, date, timeSlot } = createAppointmentDto;
 
+    // Verify appointment time is not in the past
+    this.verifyAppointmentTime(date, timeSlot);
+
+    // Verify user has an active subscription with available meetings and get subscription ID
+    const subscriptionId = await this.verifyUserSubscription(userId);
+
+    // Continue with the existing doctor availability checks
     const doctor = await this.doctorsService.findOne(doctorId);
     if (!doctor) {
       throw new NotFoundException(`Doctor with ID ${doctorId} not found`);
@@ -93,13 +154,6 @@ export class AppointmentsService {
       appointmentStatus: 'scheduled',
     };
 
-    // Only add paymentId if it was provided
-    if (createAppointmentDto.paymentId) {
-      appointmentData.paymentId = new Types.ObjectId(
-        createAppointmentDto.paymentId,
-      );
-    }
-
     try {
       const newAppointment = new this.appointmentModel(appointmentData);
       const savedAppointment = await newAppointment.save();
@@ -112,7 +166,11 @@ export class AppointmentsService {
         await this.chatService.createChatRoom({
           patientId: createAppointmentDto.userId,
           doctorId: createAppointmentDto.doctorId,
+<<<<<<< HEAD
           appointmentId: (savedAppointment._id as any).toString(),
+=======
+          appointmentId: savedAppointment.id.toString(),
+>>>>>>> 5214123cbfa741d25382928cf104f4098b8416f0
         });
         this.logger.log(
           `Chat room created for appointment ${savedAppointment._id}`,
@@ -120,6 +178,16 @@ export class AppointmentsService {
       } catch (chatError) {
         this.logger.warn(`Failed to create chat room: ${chatError.message}`);
         // Don't fail appointment creation if chat room fails
+      }
+
+      // Record meeting usage in subscription
+      try {
+        await this.subscriptionService.useMeeting(subscriptionId);
+        this.logger.log(`Meeting usage recorded in subscription: ${subscriptionId}`);
+      } catch (error) {
+        this.logger.error(`Failed to record meeting usage: ${error.message}`);
+        // Don't fail appointment creation if updating subscription fails
+        // But log the error for monitoring
       }
 
       return savedAppointment;
@@ -204,6 +272,29 @@ export class AppointmentsService {
     return appointment;
   }
 
+  /**
+   * Updates appointment status and handles related subscription meeting tracking
+   */
+  async updateAppointmentStatus(id: string, status: 'scheduled' | 'completed' | 'cancelled') {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('Invalid appointment ID format');
+    }
+
+    const appointment = await this.appointmentModel
+      .findByIdAndUpdate(
+        id, 
+        { appointmentStatus: status }, 
+        { new: true }
+      )
+      .exec();
+
+    if (!appointment) {
+      throw new NotFoundException(`Appointment with ID ${id} not found`);
+    }
+
+    return appointment;
+  }
+
   async cancelAppointment(id: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid appointment ID format');
@@ -221,6 +312,9 @@ export class AppointmentsService {
     } catch (error) {
       this.logger.error(`Failed to send cancellation emails: ${error.message}`);
     }
+
+    // Option: could implement refund of meeting to subscription if needed
+    // await this.subscriptionService.refundMeeting(userId);
 
     return updatedAppointment;
   }
@@ -274,6 +368,7 @@ export class AppointmentsService {
       })
       .exec();
 
+    // Remove booked time slots
     bookedAppointments.forEach((appointment) => {
       const hours = appointment.startTime
         .getHours()
@@ -290,6 +385,31 @@ export class AppointmentsService {
         availableTimeSlots.splice(index, 1);
       }
     });
+    
+    // Filter out time slots in the past
+    const now = new Date();
+    const isToday = dateObj.setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+    
+    if (isToday) {
+      // Add a small buffer (e.g., 30 minutes) for upcoming appointments
+      const bufferMinutes = 30;
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes() + bufferMinutes;
+      
+      const filteredTimeSlots = availableTimeSlots.filter(timeSlot => {
+        const [slotHour, slotMinute] = timeSlot.split(':').map(num => parseInt(num, 10));
+        if (slotHour > currentHour || (slotHour === currentHour && slotMinute > currentMinute)) {
+          return true;
+        }
+        return false;
+      });
+      
+      return {
+        available: filteredTimeSlots.length > 0,
+        timeSlots: filteredTimeSlots,
+        pastSlotsRemoved: availableTimeSlots.length - filteredTimeSlots.length,
+      };
+    }
 
     return {
       available: availableTimeSlots.length > 0,
@@ -498,12 +618,15 @@ export class AppointmentsService {
     // For testing: allow anyone to join
     const isPatient = appointment.userId.toString() === userId;
     const isDoctor = appointment.doctorId.toString() === userId;
+
     const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'tester';
 
     // Get call details
-    const call = await this.callService.getCallById(
-      appointment.callId.toString(),
-    );
+    const call = await this.callService.getCallById(appointment.callId.toString());
+
+    if (!call) {
+      throw new NotFoundException('Call not found');
+    }
 
     if (call.status === 'ended') {
       throw new BadRequestException('Call has already ended');
@@ -514,19 +637,20 @@ export class AppointmentsService {
     const token = this.agoraService.generateRtcToken(call.roomId, uid);
 
     return {
-      callId: call._id,
-      channelName: call.roomId,
-      token,
-      uid,
-      userRole,
-      callStatus: call.status,
-      otherParticipant: isPatient ? call.doctorId : call.patientId,
-      agoraAppId: this.agoraService.getAppId(),
       appointment: {
         id: appointment._id,
         startTime: appointment.startTime,
         endTime: appointment.endTime,
+        status: appointment.appointmentStatus,
       },
+      agoraAppId: this.agoraService.getAppId(),
+      otherParticipant: isPatient ? call.doctorId : call.patientId,
+      callStatus: call.status,
+      userRole,
+      uid,
+      token,
+      channelName: call.roomId,
+      callId: call._id,
       message: 'Ready to join video call - Testing Mode',
     };
   }

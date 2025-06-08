@@ -198,13 +198,13 @@ export class ChatService {
     if (userType === 'patient') {
       filter.patientId = new Types.ObjectId(userId);
     } else {
-      filter.doctorId = new Types.ObjectId(userId);
+      filter.doctorId = new Types.ObjectId(userId); // <- Doctor filter
     }
 
     return this.chatRoomModel
       .find(filter)
-      .populate('patientId', 'fullName avatarUrl')
-      .populate('doctorId', 'fullName avatarUrl photoUrl')
+      .populate('patientId', 'fullName avatarUrl') // Patient info
+      .populate('doctorId', 'fullName avatarUrl photoUrl') // Doctor info
       .populate('lastMessageId')
       .sort({ lastActivity: -1 })
       .exec();
