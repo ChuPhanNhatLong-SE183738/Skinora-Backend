@@ -112,7 +112,7 @@ export class AppointmentsService {
         await this.chatService.createChatRoom({
           patientId: createAppointmentDto.userId,
           doctorId: createAppointmentDto.doctorId,
-          appointmentId: savedAppointment._id.toString(),
+          appointmentId: (savedAppointment._id as any).toString(),
         });
         this.logger.log(
           `Chat room created for appointment ${savedAppointment._id}`,
