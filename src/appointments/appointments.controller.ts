@@ -9,6 +9,8 @@ import {
   UseGuards,
   Query,
   Request,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -33,14 +35,38 @@ export class AppointmentsController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN, Role.DOCTOR)
+  @ApiOperation({ summary: 'Create a new appointment' })
+  @ApiResponse({ status: 201, description: 'Appointment created successfully' })
+  @ApiResponse({ status: 400, description: 'Bad request - Invalid data or subscription issues' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async create(@Body() createAppointmentDto: CreateAppointmentDto) {
-    const appointment =
-      await this.appointmentsService.create(createAppointmentDto);
-    return {
-      success: true,
-      message: 'Appointment scheduled successfully',
-      data: appointment,
-    };
+    try {
+      const appointment = await this.appointmentsService.create(createAppointmentDto);
+      return {
+        success: true,
+        message: 'Appointment scheduled successfully',
+        data: appointment,
+      };
+    } catch (error) {
+      if (error.message.includes('subscription') || error.message.includes('meetings')) {
+        // Specific handling for subscription-related errors
+        return {
+          success: false,
+          message: error.message,
+          error: 'SUBSCRIPTION_REQUIRED',
+          code: 'INSUFFICIENT_MEETINGS',
+        };
+      }
+
+      // For other errors
+      throw new HttpException(
+        {
+          success: false,
+          message: error.message,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   @Get()
@@ -198,7 +224,7 @@ export class AppointmentsController {
   @Post(':id/join-call')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Join existing video call for appointment' })
-  async joinVideoCall(@Param('id') appointmentId: string, @Request() req) {
+  async joinVideoCall(@Param('id') appointmentId: string, @Request() req: any) {
     try {
       const userId = req.user.sub || req.user.id;
       const result = await this.appointmentsService.joinVideoCall(
@@ -273,9 +299,33 @@ export class AppointmentsController {
         data: result,
       };
     } catch (error) {
+      console.error('Error joining video call:', error);
       return {
         success: false,
         message: error.message,
+      };
+    }
+  }
+
+  @Get('check-subscription/:userId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Check if user can book appointments' })
+  @ApiResponse({ status: 200, description: 'User can book appointments' })
+  @ApiResponse({ status: 400, description: 'User cannot book appointments due to subscription issues' })
+  async checkSubscriptionForBooking(@Param('userId') userId: string) {
+    try {
+      await this.appointmentsService.verifyUserSubscription(userId);
+      return {
+        success: true,
+        message: 'User has a valid subscription with available meetings',
+        canBook: true,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        canBook: false,
+        error: error.message.includes('meetings') ? 'INSUFFICIENT_MEETINGS' : 'NO_SUBSCRIPTION',
       };
     }
   }

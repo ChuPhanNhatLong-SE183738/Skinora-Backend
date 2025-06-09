@@ -2,14 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ChatHistory, ChatHistoryDocument } from './entities/chat_history.entity';
-import { ChatMessage, ChatMessageDocument } from '../chat_messages/entities/chat_message.entity';
+import { ChatMessages, ChatMessageDocument } from '../chat_messages/entities/chat_message.entity';
 
 @Injectable()
 export class ChatHistoryService {
   constructor(
     @InjectModel(ChatHistory.name)
     private readonly chatHistoryModel: Model<ChatHistoryDocument>,
-    @InjectModel(ChatMessage.name)
+    @InjectModel(ChatMessages.name)
     private readonly chatMessageModel: Model<ChatMessageDocument>,
   ) {}
 

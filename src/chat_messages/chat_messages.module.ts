@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ChatMessage, ChatMessageSchema } from './entities/chat_message.entity';
+import { ChatMessages, ChatMessageSchema } from './entities/chat_message.entity';
 import { ChatMessagesService } from './chat_messages.service';
 import { ChatMessagesController } from './chat_messages.controller';
 import { ChatHistory, ChatHistorySchema } from '../chat_history/entities/chat_history.entity';
@@ -8,7 +8,7 @@ import { ChatHistory, ChatHistorySchema } from '../chat_history/entities/chat_hi
 @Module({
   imports: [
     MongooseModule.forFeature([
-      { name: ChatMessage.name, schema: ChatMessageSchema },
+      { name: ChatMessages.name, schema: ChatMessageSchema },
       { name: ChatHistory.name, schema: ChatHistorySchema },
     ]),
   ],
