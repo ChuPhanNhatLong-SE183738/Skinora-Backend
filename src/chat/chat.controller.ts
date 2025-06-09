@@ -12,6 +12,7 @@ import {
   UseInterceptors,
   UploadedFile,
   UploadedFiles,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -24,7 +25,6 @@ import {
   ApiParam,
   ApiQuery,
 } from '@nestjs/swagger';
-import { ChatService } from './chat.service';
 import { CreateChatRoomDto } from './dto/create-chat-room.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -32,6 +32,10 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { Role } from '../users/enums/role.enum';
 import { Logger } from '@nestjs/common';
+import { successResponse, errorResponse } from '../helper/response.helper';
+import { ChatService } from './chat.service';
+import { ChatGateway } from './chat.gateway';
+import { UploadFileDto } from './dto/upload-file.dto';
 
 @ApiTags('chat')
 @ApiBearerAuth()
@@ -40,7 +44,10 @@ import { Logger } from '@nestjs/common';
 export class ChatController {
   private readonly logger = new Logger(ChatController.name);
 
-  constructor(private readonly chatService: ChatService) {}
+  constructor(
+    private readonly chatService: ChatService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   @Post('rooms')
   @UseGuards(RolesGuard)
@@ -152,8 +159,9 @@ export class ChatController {
   }
 
   @Post('rooms/:roomId/messages')
-  @ApiOperation({ summary: 'Send a message in chat room' })
-  @ApiParam({ name: 'roomId', description: 'Chat room ID' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Send message to chat room' })
   @ApiResponse({
     status: 201,
     description: 'Message sent successfully',
@@ -162,46 +170,71 @@ export class ChatController {
         success: true,
         message: 'Message sent successfully',
         data: {
-          _id: '676789xyz...',
-          chatRoomId: '676123abc...',
-          senderId: { _id: '675abc123...', fullName: 'John Doe' },
-          senderType: 'patient',
-          content: 'Hello doctor, I need help',
+          _id: '675ce123abc456def789',
+          chatRoomId: '675ce123abc456def789',
+          senderId: {
+            _id: '675ce123abc456def789',
+            fullName: 'Dr. Smith',
+            avatarUrl: 'doctor-avatar.jpg',
+          },
+          senderType: 'doctor',
+          content: 'Hello, how are you feeling today?',
           messageType: 'text',
+          timestamp: '2025-01-06T10:30:00.000Z',
           isRead: false,
-          createdAt: '2025-01-06T12:00:00.000Z',
         },
       },
     },
   })
   async sendMessage(
     @Param('roomId') roomId: string,
-    @Body() sendMessageDto: SendMessageDto,
     @Request() req,
+    @Body() sendMessageDto: SendMessageDto,
   ) {
     try {
       const userId = req.user.sub || req.user.id;
       const senderType = req.user.role === 'doctor' ? 'doctor' : 'patient';
 
-      this.logger.log(`📥 POST /chat/rooms/${roomId}/messages`);
-      this.logger.log(`Sender: ${userId} (${senderType})`);
-      this.logger.log(`Message: ${sendMessageDto.content}`);
+      // Enhanced debug logging
+      this.logger.log(`🔍 [DEBUG] Controller sendMessage:`, {
+        roomId,
+        userId,
+        userIdFromToken: req.user,
+        senderType,
+        messageContent: sendMessageDto.content,
+        messageType: sendMessageDto.messageType,
+      });
 
-      const message = await this.chatService.sendMessage(
+      // Validate required parameters
+      if (!roomId || roomId === 'undefined') {
+        throw new BadRequestException('Invalid roomId from URL parameter');
+      }
+      if (!userId || userId === 'undefined') {
+        this.logger.error(`❌ Invalid userId from JWT token:`, req.user);
+        throw new BadRequestException('Invalid userId from JWT token');
+      }
+
+      // Call with 4 parameters: (roomId, userId, senderType, sendMessageDto)
+      const result = await this.chatService.sendMessage(
         roomId,
         userId,
         senderType,
         sendMessageDto,
       );
 
-      this.logger.log(`✅ Message sent successfully: ${(message as any)._id}`);
       return {
         success: true,
         message: 'Message sent successfully',
-        data: message,
+        data: result.data,
       };
     } catch (error) {
-      this.logger.error(`❌ Error sending message: ${error.message}`);
+      this.logger.error(`❌ Error in sendMessage controller:`, {
+        error: error.message,
+        stack: error.stack,
+        roomId,
+        userId: req.user?.sub || req.user?.id,
+        reqUser: req.user,
+      });
       return {
         success: false,
         message: error.message,
@@ -253,22 +286,35 @@ export class ChatController {
     @Query('limit') limit: number = 50,
     @Request() req,
   ) {
-    const userId = req.user.sub || req.user.id;
-    const userType = req.user.role === 'doctor' ? 'doctor' : 'patient';
+    try {
+      const userId = req.user.sub || req.user.id;
+      const userType = req.user.role === 'doctor' ? 'doctor' : 'patient';
 
-    const messages = await this.chatService.getChatMessages(
-      roomId,
-      userId,
-      userType,
-      +page,
-      +limit,
-    );
+      this.logger.log(
+        `🔍 [DEBUG] Getting messages for room: ${roomId}, user: ${userId}, type: ${userType}`,
+      );
 
-    return {
-      success: true,
-      message: 'Messages retrieved successfully',
-      data: messages,
-    };
+      // Call service method that queries the "message" collection directly
+      const messages = await this.chatService.getMessages(
+        roomId,
+        +page,
+        +limit,
+      );
+
+      this.logger.log(`📊 [DEBUG] Found ${messages.length} messages`);
+
+      return {
+        success: true,
+        message: 'Messages retrieved successfully',
+        data: messages,
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error getting messages: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
   }
 
   @Patch('rooms/:roomId/read')
@@ -376,7 +422,7 @@ export class ChatController {
   async uploadFiles(
     @Param('roomId') roomId: string,
     @UploadedFiles() files: Express.Multer.File[],
-    @Body() body: { content?: string },
+    @Body() uploadFileDto: UploadFileDto,
     @Request() req,
   ) {
     try {
@@ -397,19 +443,24 @@ export class ChatController {
       );
 
       // Determine message type and content
-      const messageType = files.some((file) =>
-        ['image/jpeg', 'image/png', 'image/gif'].includes(file.mimetype),
-      )
-        ? 'image'
-        : 'file';
+      const messageType =
+        uploadFileDto.messageType ||
+        (files.some((file) =>
+          ['image/jpeg', 'image/png', 'image/gif'].includes(file.mimetype),
+        )
+          ? 'image'
+          : 'file');
 
       const content =
-        body.content ||
+        uploadFileDto.content ||
         (messageType === 'image' ? '📷 Shared an image' : '📎 Shared a file');
 
-      const sendMessageDto = {
+      const sendMessageDto: SendMessageDto = {
+        roomId: roomId,
+        senderId: userId,
+        senderType: senderType,
         content,
-        messageType,
+        messageType: messageType as 'text' | 'image' | 'file',
         attachments,
       };
 
@@ -472,7 +523,7 @@ export class ChatController {
   async uploadImage(
     @Param('roomId') roomId: string,
     @UploadedFile() file: Express.Multer.File,
-    @Body() body: { content?: string },
+    @Body() uploadFileDto: UploadFileDto,
     @Request() req,
   ) {
     try {
@@ -488,8 +539,11 @@ export class ChatController {
 
       const imageUrl = `${req.protocol}://${req.get('host')}/uploads/chat/images/${file.filename}`;
 
-      const sendMessageDto = {
-        content: body.content || '📷 Shared an image',
+      const sendMessageDto: SendMessageDto = {
+        roomId: roomId,
+        senderId: userId,
+        senderType: senderType,
+        content: uploadFileDto.content || '📷 Shared an image',
         messageType: 'image',
         attachments: [imageUrl],
       };
@@ -517,6 +571,158 @@ export class ChatController {
       };
     } catch (error) {
       this.logger.error(`❌ Error uploading image: ${error.message}`);
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post('send-to-doctor')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Send message from patient to doctor' })
+  async sendMessageToDoctor(
+    @Request() req,
+    @Body() sendMessageDto: SendMessageDto,
+  ) {
+    try {
+      const userId = req.user.sub || req.user.id;
+      const senderType = 'patient';
+
+      // Call with 3 parameters: (userId, senderType, sendMessageDto)
+      const result = await this.chatService.sendMessage(
+        userId,
+        senderType,
+        sendMessageDto,
+      );
+      return successResponse(result.data, result.message, 201);
+    } catch (error) {
+      this.logger.error(`Error in sendMessageToDoctor: ${error.message}`);
+      return errorResponse(error.message);
+    }
+  }
+
+  @Post('send-to-patient')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Send message from doctor to patient' })
+  async sendMessageToPatient(
+    @Request() req,
+    @Body() sendMessageDto: SendMessageDto,
+  ) {
+    try {
+      const userId = req.user.sub || req.user.id;
+      const senderType = 'doctor';
+
+      // Call with 3 parameters: (userId, senderType, sendMessageDto)
+      const result = await this.chatService.sendMessage(
+        userId,
+        senderType,
+        sendMessageDto,
+      );
+      return successResponse(result.data, result.message, 201);
+    } catch (error) {
+      this.logger.error(`Error in sendMessageToPatient: ${error.message}`);
+      return errorResponse(error.message);
+    }
+  }
+
+  @Get('debug/token/:roomId')
+  @ApiOperation({ summary: 'Debug: Check JWT token extraction' })
+  async debugToken(@Param('roomId') roomId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+      const senderType = req.user.role === 'doctor' ? 'doctor' : 'patient';
+
+      return {
+        success: true,
+        message: 'Token debug info',
+        data: {
+          roomId,
+          extractedUserId: userId,
+          userIdType: typeof userId,
+          userIdValid: userId ? 'YES' : 'NO',
+          senderType,
+          fullTokenPayload: req.user,
+          headers: req.headers.authorization,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/websocket-status')
+  @ApiOperation({ summary: 'Debug: Get WebSocket connection status' })
+  async debugWebSocketStatus() {
+    try {
+      const connectedUsersCount =
+        this.chatGateway?.getConnectedUsersCount() || 0;
+      const connectedUsers = this.chatGateway?.getConnectedUsers() || [];
+
+      return {
+        success: true,
+        message: 'WebSocket status retrieved',
+        data: {
+          timestamp: new Date().toISOString(),
+          connectedUsersCount,
+          connectedUsers,
+          gatewayAvailable: !!this.chatGateway,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/websocket-test')
+  @ApiOperation({ summary: 'Test WebSocket server status' })
+  async testWebSocketStatus() {
+    try {
+      return {
+        success: true,
+        message: 'WebSocket server is running',
+        data: {
+          timestamp: new Date().toISOString(),
+          serverStatus: 'active',
+          namespace: '/chat',
+          corsEnabled: true,
+          gatewayAvailable: !!this.chatGateway,
+          connectedUsers: this.chatGateway?.getConnectedUsersCount() || 0,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/room-status/:roomId')
+  @ApiOperation({ summary: 'Debug: Get room connection status' })
+  async debugRoomStatus(@Param('roomId') roomId: string) {
+    try {
+      const membersCount =
+        (await this.chatGateway?.getRoomMembersCount(roomId)) || 0;
+
+      return {
+        success: true,
+        message: 'Room status retrieved',
+        data: {
+          roomId,
+          membersCount,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
       return {
         success: false,
         message: error.message,

@@ -8,15 +8,17 @@ import { CallController } from './call.controller';
 import { CallService } from './call.service';
 import { CallGateway } from './call.gateway';
 import { Doctor, DoctorSchema } from '../doctors/entities/doctor.entity';
+import { WebSocketModule } from '../websocket/websocket.module';
+import { UsersModule } from '../users/users.module'; // Import UsersModule
+import { DoctorsModule } from '../doctors/doctors.module'; // Import DoctorsModule
 
 @Module({
   imports: [
-    MongooseModule.forFeature([
-      { name: Call.name, schema: CallSchema },
-      { name: User.name, schema: UserSchema },
-      { name: Doctor.name, schema: DoctorSchema },
-    ]),
-    SubscriptionModule, // Import SubscriptionModule for SubscriptionService
+    MongooseModule.forFeature([{ name: Call.name, schema: CallSchema }]),
+    WebSocketModule,
+    UsersModule, // Add UsersModule
+    DoctorsModule, // Add DoctorsModule
+    SubscriptionModule, // Add SubscriptionModule
   ],
   controllers: [CallController],
   providers: [CallService, AgoraService],

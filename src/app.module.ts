@@ -16,6 +16,7 @@ import { PaymentModule } from './payment/payment.module';
 import { ChatModule } from './chat/chat.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { WebSocketModule } from './websocket/websocket.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { join } from 'path';
     SubscriptionModule,
     PaymentModule,
     ChatModule,
+    WebSocketModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',

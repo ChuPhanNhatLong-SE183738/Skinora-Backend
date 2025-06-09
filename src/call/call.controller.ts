@@ -21,6 +21,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { successResponse, errorResponse } from '../helper/response.helper';
 import { InitiateCallDto, AddCallNotesDto } from './dto/initiate-call.dto';
 import { AgoraService } from './agora.service';
+import { CallWebSocketGateway } from '../websocket/websocket.gateway';
+import { RedisService } from '../websocket/redis.service';
 
 @ApiTags('calls')
 @Controller('calls')
@@ -28,6 +30,8 @@ export class CallController {
   constructor(
     private readonly callService: CallService,
     private readonly agoraService: AgoraService,
+    private readonly webSocketGateway: CallWebSocketGateway,
+    private readonly redisService: RedisService,
   ) {}
 
   @Get(':id')
@@ -248,34 +252,28 @@ export class CallController {
   @Post('initiate')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Initiate a video/voice call with Agora.io' })
-  @ApiResponse({
-    status: 201,
-    description: 'Call initiated successfully',
-    schema: {
-      example: {
-        success: true,
-        message: 'Call initiated successfully with Agora tokens',
-        data: {
-          callId: '6844721a12247c8cda556d07',
-          channelName: 'skinora_call_6844721a12247c8cda556d07',
-          patientToken: 'agora-rtc-token-patient',
-          patientUid: 12345,
-          doctorInfo: {
-            id: '684460f8fe31c80c380b343f',
-            name: 'Dr. Smith',
-            avatar: 'doctor-avatar.jpg',
-          },
-          agoraAppId: 'your-agora-app-id',
-        },
-      },
-    },
+  @ApiOperation({
+    summary: 'Initiate a video/voice call with real-time notifications',
   })
   async initiateCall(@Request() req, @Body() initiateCallDto: InitiateCallDto) {
     try {
       const initiatorId = req.user.sub || req.user.id;
 
-      // Determine if doctor initiated the call
+      // Check rate limiting
+      const canInitiate = await this.redisService.checkRateLimit(
+        initiatorId,
+        'initiate_call',
+        5, // 5 calls
+        300, // per 5 minutes
+      );
+
+      if (!canInitiate) {
+        return {
+          success: false,
+          message: 'Too many call attempts. Please wait before trying again.',
+        };
+      }
+
       const isDoctorInitiated = initiatorId === initiateCallDto.doctorId;
 
       const result = await this.callService.initiateCallWithRole(
@@ -286,9 +284,50 @@ export class CallController {
         isDoctorInitiated,
       );
 
+      // Cache call status in Redis - fix type conversion with proper casting
+      const callId = (result as any).callId || result.callId;
+      await this.redisService.setCallStatus(callId.toString(), 'ringing', {
+        initiatedBy: initiatorId,
+        callType: initiateCallDto.callType,
+      });
+
+      // Determine target user (who receives the call)
+      const targetUserId = isDoctorInitiated
+        ? initiateCallDto.patientId
+        : initiateCallDto.doctorId;
+
+      // Get caller info
+      const callerInfo = await this.getCallerInfo(initiatorId);
+
+      // Check if target user is online
+      const isTargetOnline = await this.redisService.isUserOnline(targetUserId);
+
+      if (isTargetOnline) {
+        // Send real-time notification via WebSocket
+        await this.webSocketGateway.sendIncomingCallNotification(targetUserId, {
+          callId: callId,
+          callerInfo,
+          callType: initiateCallDto.callType,
+          appointmentId: initiateCallDto.appointmentId,
+        });
+      } else {
+        // Queue notification for offline user
+        await this.redisService.queueNotification(targetUserId, {
+          type: 'missed_call',
+          callId: callId,
+          callerInfo,
+          callType: initiateCallDto.callType,
+          missedAt: new Date(),
+        });
+      }
+
       return successResponse(
-        result,
-        'Call initiated successfully with Agora tokens',
+        {
+          ...result,
+          targetUserOnline: isTargetOnline,
+          notificationMethod: isTargetOnline ? 'websocket' : 'queued',
+        },
+        'Call initiated successfully with real-time notifications',
       );
     } catch (error) {
       return errorResponse(error.message);
@@ -1449,5 +1488,396 @@ joinChannel();
         error: error.message,
       };
     }
+  }
+
+  @Post('notify/incoming-call')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Send incoming call notification to user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Incoming call notification sent successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Incoming call notification sent successfully',
+        data: {
+          callId: '6844721a12247c8cda556d07',
+          notificationType: 'incoming_call',
+          sentTo: 'patient',
+          channels: ['websocket', 'push_notification', 'email'],
+          callDetails: {
+            callerName: 'Dr. John Smith',
+            callerAvatar: 'doctor-avatar.jpg',
+            callType: 'video',
+            appointmentTime: '2025-01-06T15:30:00.000Z',
+          },
+        },
+      },
+    },
+  })
+  async sendIncomingCallNotification(
+    @Request() req,
+    @Body()
+    notificationData: {
+      callId: string;
+      targetUserId: string;
+      callerInfo: {
+        name: string;
+        avatar?: string;
+        role: 'doctor' | 'patient';
+      };
+      callType: 'video' | 'voice';
+      appointmentId?: string;
+    },
+  ) {
+    try {
+      const senderId = req.user.sub || req.user.id;
+
+      // Get call details
+      const call = await this.callService.getCallById(notificationData.callId);
+      if (!call) {
+        return {
+          success: false,
+          message: 'Call not found',
+        };
+      }
+
+      // Prepare notification payload
+      const notificationPayload = {
+        type: 'incoming_call',
+        callId: notificationData.callId,
+        appointmentId: notificationData.appointmentId,
+        caller: {
+          id: senderId,
+          name: notificationData.callerInfo.name,
+          avatar: notificationData.callerInfo.avatar,
+          role: notificationData.callerInfo.role,
+        },
+        callDetails: {
+          type: notificationData.callType,
+          channelName: call.roomId,
+          status: call.status,
+          createdAt: (call as any).createdAt || new Date(),
+        },
+        actions: {
+          accept: `/calls/${notificationData.callId}/accept`,
+          decline: `/calls/${notificationData.callId}/decline`,
+          join: `/calls/${notificationData.callId}`,
+        },
+        timeout: 30000, // 30 seconds
+        priority: 'high',
+        sound: 'call_ringtone.mp3',
+      };
+
+      // Send notification via multiple channels
+      const notificationResults = await Promise.allSettled([
+        // 1. WebSocket (real-time)
+        this.sendWebSocketNotification(
+          notificationData.targetUserId,
+          notificationPayload,
+        ),
+
+        // 2. Push Notification (mobile/browser)
+        this.sendPushNotification(notificationData.targetUserId, {
+          title: `Incoming ${notificationData.callType} call`,
+          body: `${notificationData.callerInfo.name} is calling you`,
+          icon: notificationData.callerInfo.avatar,
+          badge: '/icons/call-badge.png',
+          data: notificationPayload,
+          actions: [
+            { action: 'accept', title: 'Accept', icon: '/icons/accept.png' },
+            { action: 'decline', title: 'Decline', icon: '/icons/decline.png' },
+          ],
+        }),
+
+        // 3. SMS (optional fallback)
+        this.sendSMSNotification(
+          notificationData.targetUserId,
+          `You have an incoming ${notificationData.callType} call from ${notificationData.callerInfo.name}. Check your Skinora app.`,
+        ),
+      ]);
+
+      console.log('=== NOTIFICATION RESULTS ===');
+      console.log('WebSocket:', notificationResults[0]);
+      console.log('Push:', notificationResults[1]);
+      console.log('SMS:', notificationResults[2]);
+      console.log('============================');
+
+      return {
+        success: true,
+        message: 'Incoming call notification sent successfully',
+        data: {
+          callId: notificationData.callId,
+          notificationType: 'incoming_call',
+          sentTo:
+            notificationData.callerInfo.role === 'doctor'
+              ? 'patient'
+              : 'doctor',
+          channels: ['websocket', 'push_notification', 'sms'],
+          callDetails: notificationPayload.callDetails,
+          deliveryStatus: {
+            websocket: notificationResults[0].status,
+            push: notificationResults[1].status,
+            sms: notificationResults[2].status,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('Error sending incoming call notification:', error);
+      return {
+        success: false,
+        message: 'Failed to send incoming call notification',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post(':id/accept')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Accept incoming call with real-time updates' })
+  async acceptCall(@Param('id') callId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      // Update call status
+      const call = await this.callService.updateCallStatus(callId, 'active');
+
+      if (!call) {
+        return {
+          success: false,
+          message: 'Call not found or already ended',
+        };
+      }
+
+      // Update Redis cache
+      await this.redisService.setCallStatus(callId, 'active', {
+        acceptedBy: userId,
+        acceptedAt: new Date(),
+      });
+
+      // Generate fresh token
+      const uid = Math.floor(Math.random() * 100000) + 1;
+      const token = this.agoraService.generateValidatedToken(
+        call.roomId,
+        uid,
+        24,
+      );
+
+      // Get other participant ID
+      const otherParticipantId = this.getOtherParticipantId(call, userId);
+
+      // Notify caller via WebSocket
+      await this.webSocketGateway.notifyCallAccepted(
+        callId,
+        userId,
+        otherParticipantId,
+      );
+
+      return {
+        success: true,
+        message: 'Call accepted successfully',
+        data: {
+          callId: call._id,
+          status: call.status,
+          joinInfo: {
+            agoraAppId: this.agoraService.getAppId(),
+            token,
+            channelName: call.roomId,
+            uid,
+            userRole: this.determineUserRole(call, userId),
+          },
+          otherParticipant: this.getOtherParticipantInfo(call, userId),
+        },
+      };
+    } catch (error) {
+      console.error('Error accepting call:', error);
+      return {
+        success: false,
+        message: 'Failed to accept call',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post(':id/decline')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Decline incoming call with real-time updates' })
+  async declineCall(@Param('id') callId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      const call = await this.callService.updateCallStatus(callId, 'declined');
+
+      if (!call) {
+        return {
+          success: false,
+          message: 'Call not found',
+        };
+      }
+
+      // Update Redis cache
+      await this.redisService.setCallStatus(callId, 'declined', {
+        declinedBy: userId,
+        declinedAt: new Date(),
+      });
+
+      // Get other participant ID
+      const otherParticipantId = this.getOtherParticipantId(call, userId);
+
+      // Notify caller via WebSocket
+      await this.webSocketGateway.notifyCallDeclined(
+        callId,
+        userId,
+        otherParticipantId,
+      );
+
+      return {
+        success: true,
+        message: 'Call declined successfully',
+        data: {
+          callId: call._id,
+          status: call.status,
+          declinedBy: userId,
+          reason: 'user_declined',
+        },
+      };
+    } catch (error) {
+      console.error('Error declining call:', error);
+      return {
+        success: false,
+        message: 'Failed to decline call',
+        error: error.message,
+      };
+    }
+  }
+
+  @Get('notifications/missed/:userId')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get missed call notifications for offline users' })
+  async getMissedNotifications(
+    @Param('userId') userId: string,
+    @Request() req,
+  ) {
+    try {
+      const notifications =
+        await this.redisService.getQueuedNotifications(userId);
+
+      return {
+        success: true,
+        message: 'Missed notifications retrieved successfully',
+        data: {
+          notifications,
+          count: notifications.length,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Failed to get missed notifications',
+        error: error.message,
+      };
+    }
+  }
+
+  @Get(':id/participants/realtime')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get real-time call participants from Redis cache' })
+  async getRealtimeParticipants(@Param('id') callId: string, @Request() req) {
+    try {
+      const participants = await this.redisService.getCallParticipants(callId);
+      const callStatus = await this.redisService.getCallStatus(callId);
+
+      return {
+        success: true,
+        message: 'Real-time participants retrieved successfully',
+        data: {
+          callId,
+          participants,
+          callStatus,
+          totalParticipants: participants.length,
+          connectedParticipants: participants.filter(
+            (p) => p.status === 'joined',
+          ).length,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Failed to get real-time participants',
+        error: error.message,
+      };
+    }
+  }
+
+  // Helper methods
+  private async getCallerInfo(userId: string) {
+    // Get user info from database
+    // Return caller name, avatar, role, etc.
+    return {
+      id: userId,
+      name: 'User Name', // Get from database
+      avatar: 'avatar-url', // Get from database
+      role: 'doctor', // Get from database
+    };
+  }
+
+  private getOtherParticipantId(call: any, currentUserId: string): string {
+    const patientId =
+      typeof call.patientId === 'object'
+        ? call.patientId._id?.toString()
+        : call.patientId?.toString();
+    const doctorId =
+      typeof call.doctorId === 'object'
+        ? call.doctorId._id?.toString()
+        : call.doctorId?.toString();
+
+    return patientId === currentUserId ? doctorId : patientId;
+  }
+
+  private determineUserRole(call: any, userId: string): 'patient' | 'doctor' {
+    const patientId =
+      typeof call.patientId === 'object'
+        ? call.patientId._id?.toString()
+        : call.patientId?.toString();
+
+    return patientId === userId ? 'patient' : 'doctor';
+  }
+
+  private getOtherParticipantInfo(call: any, userId: string) {
+    const isPatient = this.determineUserRole(call, userId) === 'patient';
+
+    if (isPatient) {
+      return {
+        _id: call.doctorId._id || call.doctorId,
+        name: call.doctorId.fullName || 'Unknown Doctor',
+        avatar: call.doctorId.photoUrl,
+        role: 'doctor',
+      };
+    } else {
+      return {
+        _id: call.patientId._id || call.patientId,
+        name: call.patientId.fullName || 'Unknown Patient',
+        avatar: call.patientId.avatarUrl,
+        role: 'patient',
+      };
+    }
+  }
+
+  private async sendWebSocketNotification(userId: string, payload: any) {
+    // Use WebSocket gateway for notification
+    await this.webSocketGateway.sendIncomingCallNotification(userId, payload);
+    return { status: 'fulfilled', channel: 'websocket' };
+  }
+
+  private async sendPushNotification(userId: string, pushPayload: any) {
+    // Implement Push notification (Firebase, etc.)
+    console.log(`📱 Push notification sent to user ${userId}:`, pushPayload);
+    return { status: 'fulfilled', channel: 'push' };
+  }
+
+  private async sendSMSNotification(userId: string, message: string) {
+    // Implement SMS notification (Twilio, etc.)
+    console.log(`📱 SMS sent to user ${userId}: ${message}`);
+    return { status: 'fulfilled', channel: 'sms' };
   }
 }

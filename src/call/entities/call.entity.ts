@@ -46,6 +46,12 @@ export class Call {
 
   @Prop({ type: Types.ObjectId })
   endedBy: Types.ObjectId; // userId who ended the call
+
+  @Prop({ type: Date })
+  createdAt: Date;
+
+  @Prop({ type: Date })
+  updatedAt: Date;
 }
 
 export const CallSchema = SchemaFactory.createForClass(Call);

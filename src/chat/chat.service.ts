@@ -1,19 +1,15 @@
 import {
   Injectable,
-  NotFoundException,
   BadRequestException,
-  ForbiddenException,
+  NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { ChatRoom, ChatRoomDocument } from './entities/chat-room.entity';
-import {
-  ChatMessage,
-  ChatMessageDocument,
-} from './entities/chat-message.entity';
 import { CreateChatRoomDto } from './dto/create-chat-room.dto';
-import { SendMessageDto } from './dto/send-message.dto';
+import { SendMessageDto, CreateMessageDto } from './dto/send-message.dto';
+import { ChatRoom, ChatRoomDocument } from './entities/chat-room.entity';
+import { Message, MessageDocument } from './entities/message.entity';
 import { ChatGateway } from './chat.gateway';
 
 @Injectable()
@@ -23,297 +19,441 @@ export class ChatService {
   constructor(
     @InjectModel(ChatRoom.name)
     private chatRoomModel: Model<ChatRoomDocument>,
-    @InjectModel(ChatMessage.name)
-    private chatMessageModel: Model<ChatMessageDocument>,
-    private chatGateway: ChatGateway,
+    @InjectModel(Message.name)
+    private messageModel: Model<MessageDocument>,
+    private chatGateway?: ChatGateway,
   ) {}
 
   async createChatRoom(createChatRoomDto: CreateChatRoomDto) {
-    try {
-      this.logger.log(
-        `🏠 Creating chat room: ${JSON.stringify(createChatRoomDto)}`,
-      );
-
-      // Check if chat room already exists
-      const existingRoom = await this.chatRoomModel
-        .findOne({
-          patientId: new Types.ObjectId(createChatRoomDto.patientId),
-          doctorId: new Types.ObjectId(createChatRoomDto.doctorId),
-          status: { $ne: 'archived' },
-        })
-        .exec();
-
-      if (existingRoom) {
-        this.logger.log(`♻️ Chat room already exists: ${existingRoom._id}`);
-        return existingRoom;
-      }
-
-      const chatRoom = new this.chatRoomModel({
+    // Check if chat room already exists between patient and doctor
+    const existingRoom = await this.chatRoomModel
+      .findOne({
         patientId: new Types.ObjectId(createChatRoomDto.patientId),
         doctorId: new Types.ObjectId(createChatRoomDto.doctorId),
-        appointmentId: createChatRoomDto.appointmentId
-          ? new Types.ObjectId(createChatRoomDto.appointmentId)
-          : undefined,
-        lastActivity: new Date(),
-      });
+      })
+      .exec();
 
-      const savedRoom = await chatRoom.save();
-      this.logger.log(`✅ Chat room created successfully: ${savedRoom._id}`);
-
-      return savedRoom;
-    } catch (error) {
-      this.logger.error(`❌ Error creating chat room: ${error.message}`);
-      throw error;
+    if (existingRoom) {
+      return existingRoom;
     }
+
+    const newChatRoom = new this.chatRoomModel({
+      patientId: new Types.ObjectId(createChatRoomDto.patientId),
+      doctorId: new Types.ObjectId(createChatRoomDto.doctorId),
+      appointmentId: createChatRoomDto.appointmentId
+        ? new Types.ObjectId(createChatRoomDto.appointmentId)
+        : undefined,
+      createdAt: new Date(),
+      lastActivity: new Date(),
+    });
+
+    return await newChatRoom.save();
   }
 
   async sendMessage(
-    chatRoomId: string,
-    senderId: string,
-    senderType: 'patient' | 'doctor',
-    sendMessageDto: SendMessageDto,
+    userIdOrRoomId: string,
+    senderTypeOrUserId: 'patient' | 'doctor' | string,
+    sendMessageDtoOrSenderType?: SendMessageDto | 'patient' | 'doctor',
+    sendMessageDtoFinal?: SendMessageDto,
   ) {
+    // Handle different call signatures
+    let userId: string;
+    let senderType: 'patient' | 'doctor';
+    let sendMessageDto: SendMessageDto;
+    let roomId: string;
+
+    if (sendMessageDtoFinal) {
+      // 4 parameter call: (roomId, userId, senderType, sendMessageDto)
+      roomId = userIdOrRoomId;
+      userId = senderTypeOrUserId as string;
+      senderType = sendMessageDtoOrSenderType as 'patient' | 'doctor';
+      sendMessageDto = sendMessageDtoFinal;
+    } else {
+      // 3 parameter call: (userId, senderType, sendMessageDto)
+      userId = userIdOrRoomId;
+      senderType = senderTypeOrUserId as 'patient' | 'doctor';
+      sendMessageDto = sendMessageDtoOrSenderType as SendMessageDto;
+      roomId = sendMessageDto.roomId || '';
+
+      // Validate roomId is provided in 3-parameter call
+      if (!roomId) {
+        throw new BadRequestException('roomId is required in message payload');
+      }
+    }
+
+    // CRITICAL DEBUG: Log every step of userId extraction
+    this.logger.log(`🔍 [CRITICAL DEBUG] sendMessage parameters:`, {
+      step: 'PARAMETER_EXTRACTION',
+      userIdOrRoomId,
+      senderTypeOrUserId,
+      sendMessageDtoOrSenderType,
+      sendMessageDtoFinal,
+      extractedUserId: userId,
+      extractedUserIdType: typeof userId,
+      extractedUserIdLength: userId?.length,
+      extractedRoomId: roomId,
+      extractedSenderType: senderType,
+    });
+
+    // Validate all required parameters with detailed logging
+    if (!userId || userId === 'undefined' || userId === 'null') {
+      this.logger.error(`❌ [CRITICAL] Invalid userId detected:`, {
+        userId,
+        userIdType: typeof userId,
+        userIdStringified: JSON.stringify(userId),
+        originalParams: { userIdOrRoomId, senderTypeOrUserId },
+      });
+      throw new BadRequestException(`Valid userId is required. Got: ${userId}`);
+    }
+
+    if (!roomId || roomId === 'undefined' || roomId === 'null') {
+      this.logger.error(`❌ [CRITICAL] Invalid roomId detected:`, {
+        roomId,
+        roomIdType: typeof roomId,
+        roomIdStringified: JSON.stringify(roomId),
+      });
+      throw new BadRequestException(`Valid roomId is required. Got: ${roomId}`);
+    }
+
+    // Enhanced ObjectId validation with detailed logging
+    this.logger.log(`🔍 [CRITICAL DEBUG] ObjectId validation:`, {
+      userId,
+      userIdIsValidObjectId: Types.ObjectId.isValid(userId),
+      roomId,
+      roomIdIsValidObjectId: Types.ObjectId.isValid(roomId),
+    });
+
+    if (!Types.ObjectId.isValid(userId)) {
+      this.logger.error(`❌ [CRITICAL] Invalid userId ObjectId format:`, {
+        userId,
+        userIdType: typeof userId,
+        userIdLength: userId?.length,
+      });
+      throw new BadRequestException(`Invalid userId format: ${userId}`);
+    }
+
+    if (!Types.ObjectId.isValid(roomId)) {
+      this.logger.error(`❌ [CRITICAL] Invalid roomId ObjectId format:`, {
+        roomId,
+        roomIdType: typeof roomId,
+        roomIdLength: roomId?.length,
+      });
+      throw new BadRequestException(`Invalid roomId format: ${roomId}`);
+    }
+
     try {
-      this.logger.log(
-        `💬 Sending message - Room: ${chatRoomId}, Sender: ${senderId} (${senderType})`,
-      );
-      this.logger.log(`Message DTO:`, sendMessageDto);
+      await this.validateChatRoomAccess(roomId, userId, senderType);
 
-      // Validate required fields - content is optional for file uploads
-      const hasContent =
-        sendMessageDto.content && sendMessageDto.content.trim();
-      const hasAttachments =
-        sendMessageDto.attachments && sendMessageDto.attachments.length > 0;
+      this.logger.log(`✅ [DEBUG] Chat room access validated`);
 
-      if (!hasContent && !hasAttachments) {
-        throw new BadRequestException(
-          'Message must have content or attachments',
+      // Create ObjectId instances with detailed logging
+      this.logger.log(`🔍 [CRITICAL DEBUG] Creating ObjectIds:`, {
+        userIdString: userId,
+        roomIdString: roomId,
+      });
+
+      const roomObjectId = new Types.ObjectId(roomId);
+      const userObjectId = new Types.ObjectId(userId);
+
+      this.logger.log(`✅ [CRITICAL DEBUG] ObjectIds created successfully:`, {
+        roomObjectId: roomObjectId.toString(),
+        userObjectId: userObjectId.toString(),
+        userObjectIdIsValid: userObjectId instanceof Types.ObjectId,
+      });
+
+      // Create message data with explicit validation
+      const messageData = {
+        chatRoomId: roomObjectId,
+        senderId: userObjectId, // This should NOT be null
+        senderType: senderType,
+        content: sendMessageDto.content,
+        messageType: sendMessageDto.messageType || 'text',
+        fileUrl: sendMessageDto.fileUrl,
+        fileName: sendMessageDto.fileName,
+        attachments: sendMessageDto.attachments || [],
+        timestamp: new Date(),
+        isRead: false,
+      };
+
+      this.logger.log(`📝 [CRITICAL DEBUG] Message data before save:`, {
+        ...messageData,
+        senderIdType: typeof messageData.senderId,
+        senderIdIsObjectId: messageData.senderId instanceof Types.ObjectId,
+        senderIdString: messageData.senderId.toString(),
+        senderIdIsNull: messageData.senderId === null,
+        senderIdIsUndefined: messageData.senderId === undefined,
+      });
+
+      // Validate senderId is not null before saving
+      if (!messageData.senderId || messageData.senderId === null) {
+        this.logger.error(`❌ [CRITICAL ERROR] senderId is null before save:`, {
+          messageData,
+          originalUserId: userId,
+          userObjectId: userObjectId,
+        });
+        throw new BadRequestException('SenderId cannot be null');
+      }
+
+      const newMessage = new this.messageModel(messageData);
+
+      this.logger.log(`📝 [CRITICAL DEBUG] Before save - Message model:`, {
+        chatRoomId: newMessage.chatRoomId,
+        senderId: newMessage.senderId,
+        senderIdType: typeof newMessage.senderId,
+        senderIdIsNull: newMessage.senderId === null,
+        senderType: newMessage.senderType,
+        content: newMessage.content,
+      });
+
+      const savedMessage = await newMessage.save();
+
+      this.logger.log(`💾 [CRITICAL DEBUG] After save - Saved message:`, {
+        id: savedMessage._id,
+        chatRoomId: savedMessage.chatRoomId,
+        senderId: savedMessage.senderId,
+        senderIdType: typeof savedMessage.senderId,
+        senderIdIsNull: savedMessage.senderId === null,
+        senderIdString: savedMessage.senderId?.toString(),
+        senderType: savedMessage.senderType,
+        content: savedMessage.content,
+      });
+
+      // If senderId is still null after save, log critical error
+      if (!savedMessage.senderId || savedMessage.senderId === null) {
+        this.logger.error(
+          `🚨 [CRITICAL ERROR] Message saved with null senderId!`,
+          {
+            messageId: savedMessage._id,
+            originalUserId: userId,
+            messageData,
+            savedMessage: savedMessage.toObject(),
+          },
         );
       }
 
-      // Validate chat room exists and user has access
-      const chatRoom = await this.validateUserAccess(
-        chatRoomId,
-        senderId,
-        senderType,
-      );
-
-      // Create message with exact field names matching schema
-      const messageData = {
-        chatRoomId: new Types.ObjectId(chatRoomId),
-        senderId: new Types.ObjectId(senderId),
-        senderType,
-        content:
-          sendMessageDto.content?.trim() ||
-          (sendMessageDto.messageType === 'image'
-            ? '📷 Image'
-            : sendMessageDto.messageType === 'file'
-              ? '📎 File'
-              : 'Message'),
-        messageType: sendMessageDto.messageType || 'text',
-        attachments: sendMessageDto.attachments || [],
-      };
-
-      this.logger.log(`Creating message with data:`, messageData);
-
-      const message = new this.chatMessageModel(messageData);
-      const savedMessage = await message.save();
-
-      this.logger.log(`✅ Message saved: ${savedMessage._id}`);
-
-      // Update chat room
-      const updateData: any = {
-        lastMessageId: savedMessage._id,
-        lastActivity: new Date(),
-      };
-
-      if (senderType === 'patient') {
-        updateData.unreadCountDoctor = (chatRoom.unreadCountDoctor || 0) + 1;
-      } else {
-        updateData.unreadCountPatient = (chatRoom.unreadCountPatient || 0) + 1;
-      }
-
-      await this.chatRoomModel.findByIdAndUpdate(chatRoomId, updateData);
-      this.logger.log(`✅ Chat room updated with unread counts`);
-
-      // Populate sender info
-      const populatedMessage = await this.chatMessageModel
+      // Populate sender info for real-time broadcast
+      const populatedMessage = await this.messageModel
         .findById(savedMessage._id)
-        .populate('senderId', 'fullName avatarUrl')
+        .populate('senderId', 'fullName avatarUrl role')
         .exec();
 
-      this.logger.log(`📤 Populated message:`, populatedMessage);
-
-      // Send real-time notification to recipient
-      const recipientId =
-        senderType === 'patient'
-          ? chatRoom.doctorId.toString()
-          : chatRoom.patientId.toString();
-
-      this.logger.log(
-        `📤 Sending real-time notification to user: ${recipientId}`,
-      );
-
-      // Send to specific user
-      this.chatGateway.sendMessageToUser(recipientId, 'new_message', {
-        chatRoomId,
-        message: populatedMessage,
-        unreadCount:
-          senderType === 'patient'
-            ? updateData.unreadCountDoctor
-            : updateData.unreadCountPatient,
+      this.logger.log(`🔍 [DEBUG] Populated message:`, {
+        id: populatedMessage?._id,
+        senderId: populatedMessage?.senderId,
+        senderIdPopulated: populatedMessage?.senderId ? 'YES' : 'NO',
       });
 
-      // Also send to room (for all participants)
-      this.logger.log(`📤 Broadcasting to room: ${chatRoomId}`);
-      this.chatGateway.sendMessageToRoom(chatRoomId, 'room_new_message', {
+      // Update chat room's last message and activity
+      await this.chatRoomModel
+        .findByIdAndUpdate(
+          roomId,
+          {
+            lastMessage: savedMessage._id,
+            lastActivity: new Date(),
+            $inc: { messageCount: 1 },
+          },
+          { new: true },
+        )
+        .exec();
+
+      this.logger.log(`📊 [DEBUG] Chat room updated with new message`);
+
+      // Update room status based on sender type
+      if (senderType === 'patient') {
+        await this.chatRoomModel.findByIdAndUpdate(roomId, {
+          patientActive: true,
+        });
+      } else {
+        await this.chatRoomModel.findByIdAndUpdate(roomId, {
+          doctorActive: true,
+        });
+      }
+
+      // Broadcast message to WebSocket
+      if (this.chatGateway) {
+        await this.chatGateway.broadcastMessage(roomId, populatedMessage);
+        this.logger.log(`📡 [DEBUG] Message broadcasted via WebSocket`);
+      }
+
+      // Send notification to sender
+      await this.sendToUser(userId, 'message_sent', {
+        chatRoomId: roomId,
         message: populatedMessage,
-        sender: {
-          id: senderId,
-          type: senderType,
-        },
+        timestamp: new Date(),
       });
 
-      // Send back to sender as confirmation
-      this.chatGateway.sendMessageToUser(senderId, 'message_sent', {
-        chatRoomId,
-        message: populatedMessage,
-        status: 'delivered',
-      });
-
-      this.logger.log(
-        `✅ Message sent successfully with real-time notifications`,
-      );
-      return populatedMessage;
+      return {
+        success: true,
+        message: 'Message sent successfully',
+        data: populatedMessage || savedMessage,
+      };
     } catch (error) {
-      this.logger.error(`❌ Error sending message: ${error.message}`);
-      this.logger.error(`Error stack: ${error.stack}`);
-      throw error;
+      this.logger.error(`❌ [ERROR] Failed to send message:`, {
+        error: error.message,
+        stack: error.stack,
+        roomId,
+        userId,
+        senderType,
+      });
+      throw new BadRequestException(`Failed to send message: ${error.message}`);
+    }
+  }
+
+  async getMessages(roomId: string, page: number = 1, limit: number = 50) {
+    this.logger.log(
+      `🔍 [DEBUG] getMessages called with roomId: ${roomId}, page: ${page}, limit: ${limit}`,
+    );
+
+    // Validate roomId format
+    if (!Types.ObjectId.isValid(roomId)) {
+      throw new BadRequestException(`Invalid roomId format: ${roomId}`);
+    }
+
+    const skip = (page - 1) * limit;
+
+    try {
+      // Query the "message" collection directly with detailed logging
+      this.logger.log(
+        `📊 [DEBUG] Querying messages collection for chatRoomId: ${roomId}`,
+      );
+
+      const messages = await this.messageModel
+        .find({ chatRoomId: new Types.ObjectId(roomId) })
+        .populate('senderId', 'fullName avatarUrl role email')
+        .sort({ timestamp: 1 }) // Oldest messages first, newest at bottom
+        .skip(skip)
+        .limit(limit)
+        .exec();
+
+      this.logger.log(
+        `✅ [DEBUG] Found ${messages.length} messages in database`,
+      );
+
+      // Log sample message for debugging
+      if (messages.length > 0) {
+        this.logger.log(`📄 [DEBUG] Sample message:`, {
+          id: messages[0]._id,
+          content: messages[0].content,
+          senderId: messages[0].senderId,
+          senderType: messages[0].senderType,
+          timestamp: messages[0].timestamp,
+        });
+      }
+
+      return messages;
+    } catch (error) {
+      this.logger.error(`❌ [ERROR] Failed to get messages:`, {
+        error: error.message,
+        roomId,
+        page,
+        limit,
+      });
+      throw new BadRequestException(`Failed to get messages: ${error.message}`);
     }
   }
 
   async getChatRooms(userId: string, userType: 'patient' | 'doctor') {
-    const filter: any = { status: { $ne: 'archived' } };
+    const query =
+      userType === 'patient'
+        ? { patientId: new Types.ObjectId(userId) }
+        : { doctorId: new Types.ObjectId(userId) };
 
-    if (userType === 'patient') {
-      filter.patientId = new Types.ObjectId(userId);
-    } else {
-      filter.doctorId = new Types.ObjectId(userId); // <- Doctor filter
-    }
-
-    return this.chatRoomModel
-      .find(filter)
-      .populate('patientId', 'fullName avatarUrl') // Patient info
-      .populate('doctorId', 'fullName avatarUrl photoUrl') // Doctor info
-      .populate('lastMessageId')
+    return await this.chatRoomModel
+      .find(query)
+      .populate('patientId', 'fullName avatarUrl')
+      .populate('doctorId', 'fullName photoUrl')
+      .populate('lastMessage')
       .sort({ lastActivity: -1 })
       .exec();
   }
 
-  async getChatMessages(
-    chatRoomId: string,
-    userId: string,
-    userType: 'patient' | 'doctor',
-    page: number = 1,
-    limit: number = 50,
-  ) {
-    // Validate access
-    await this.validateUserAccess(chatRoomId, userId, userType);
-
-    const skip = (page - 1) * limit;
-
-    const messages = await this.chatMessageModel
-      .find({ chatRoomId: new Types.ObjectId(chatRoomId) })
-      .populate('senderId', 'fullName avatarUrl')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
+  async getChatRoom(chatRoomId: string) {
+    return await this.chatRoomModel
+      .findById(chatRoomId)
+      .populate('patientId', 'fullName avatarUrl')
+      .populate('doctorId', 'fullName photoUrl')
+      .populate('lastMessage')
       .exec();
-
-    return messages.reverse(); // Return in chronological order
   }
 
+  // Update markMessagesAsRead to accept userType parameter
   async markMessagesAsRead(
-    chatRoomId: string,
+    roomId: string,
     userId: string,
-    userType: 'patient' | 'doctor',
+    userType?: 'patient' | 'doctor',
   ) {
-    // Validate access
-    await this.validateUserAccess(chatRoomId, userId, userType);
+    // Validate access if userType is provided
+    if (userType) {
+      await this.validateChatRoomAccess(roomId, userId, userType);
+    }
 
-    // Mark messages as read
-    await this.chatMessageModel.updateMany(
+    await this.messageModel.updateMany(
       {
-        chatRoomId: new Types.ObjectId(chatRoomId),
+        chatRoomId: new Types.ObjectId(roomId),
         senderId: { $ne: new Types.ObjectId(userId) },
         isRead: false,
       },
-      {
-        isRead: true,
-        readAt: new Date(),
-      },
+      { isRead: true },
     );
-
-    // Reset unread count
-    const updateData =
-      userType === 'patient'
-        ? { unreadCountPatient: 0 }
-        : { unreadCountDoctor: 0 };
-
-    await this.chatRoomModel.findByIdAndUpdate(chatRoomId, updateData);
-
-    return { success: true };
   }
 
-  private async validateUserAccess(
-    chatRoomId: string,
+  private async validateChatRoomAccess(
+    roomId: string,
     userId: string,
     userType: 'patient' | 'doctor',
-  ) {
-    try {
-      this.logger.log(
-        `🔐 Validating user access - Room: ${chatRoomId}, User: ${userId} (${userType})`,
-      );
-
-      const chatRoom = await this.chatRoomModel.findById(chatRoomId).exec();
-
-      if (!chatRoom) {
-        this.logger.error(`❌ Chat room not found: ${chatRoomId}`);
-        throw new NotFoundException('Chat room not found');
-      }
-
-      const hasAccess =
-        userType === 'patient'
-          ? chatRoom.patientId.toString() === userId
-          : chatRoom.doctorId.toString() === userId;
-
-      if (!hasAccess) {
-        this.logger.error(
-          `❌ Access denied for user ${userId} to room ${chatRoomId}`,
-        );
-        throw new ForbiddenException('Access denied to this chat room');
-      }
-
-      this.logger.log(`✅ User access validated successfully`);
-      return chatRoom;
-    } catch (error) {
-      this.logger.error(`❌ Error validating user access: ${error.message}`);
-      throw error;
+  ): Promise<void> {
+    // Validate inputs before using them
+    if (!roomId || roomId === 'undefined') {
+      throw new BadRequestException('Valid roomId is required for validation');
     }
-  }
+    if (!userId || userId === 'undefined') {
+      throw new BadRequestException('Valid userId is required for validation');
+    }
+    if (!userType) {
+      throw new BadRequestException(
+        'Valid userType is required for validation',
+      );
+    }
 
-  async getChatRoom(chatRoomId: string) {
-    const chatRoom = await this.chatRoomModel
-      .findById(chatRoomId)
-      .populate('patientId', 'fullName avatarUrl')
-      .populate('doctorId', 'fullName avatarUrl photoUrl')
-      .populate('appointmentId')
-      .exec();
+    // Validate ObjectId format
+    if (!Types.ObjectId.isValid(roomId)) {
+      throw new BadRequestException('Invalid roomId format');
+    }
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('Invalid userId format');
+    }
+
+    const chatRoom = await this.chatRoomModel.findById(roomId).exec();
 
     if (!chatRoom) {
       throw new NotFoundException('Chat room not found');
     }
 
-    return chatRoom;
+    const isPatientInRoom = chatRoom.patientId.toString() === userId;
+    const isDoctorInRoom = chatRoom.doctorId.toString() === userId;
+
+    if (!isPatientInRoom && !isDoctorInRoom) {
+      throw new BadRequestException(
+        'You are not authorized to access this chat room',
+      );
+    }
+
+    if (userType === 'patient' && !isPatientInRoom) {
+      throw new BadRequestException(
+        'User type mismatch: not the patient in this room',
+      );
+    }
+
+    if (userType === 'doctor' && !isDoctorInRoom) {
+      throw new BadRequestException(
+        'User type mismatch: not the doctor in this room',
+      );
+    }
+  }
+
+  private async sendToUser(userId: string, event: string, data: any) {
+    if (this.chatGateway) {
+      await this.chatGateway.sendToUser(userId, event, data);
+    }
   }
 }

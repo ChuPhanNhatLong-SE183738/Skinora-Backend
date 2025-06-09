@@ -566,4 +566,43 @@ export class CallService {
       agoraAppId: this.agoraService.getAppId(),
     };
   }
+
+  async updateCallStatus(callId: string, status: string) {
+    if (!Types.ObjectId.isValid(callId)) {
+      throw new BadRequestException('Invalid call ID format');
+    }
+
+    const call = await this.callModel
+      .findByIdAndUpdate(callId, { status }, { new: true })
+      .exec();
+
+    if (!call) {
+      throw new NotFoundException(`Call with ID ${callId} not found`);
+    }
+
+    return call;
+  }
+
+  async getIncomingCallForUser(userId: string) {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new BadRequestException('Invalid user ID format');
+    }
+
+    // Find calls where the user is either patient or doctor and status is 'ringing'
+    const incomingCall = await this.callModel
+      .findOne({
+        $or: [
+          { patientId: new Types.ObjectId(userId) },
+          { doctorId: new Types.ObjectId(userId) },
+        ],
+        status: 'ringing',
+        createdAt: { $gte: new Date(Date.now() - 30000) }, // Only calls from last 30 seconds
+      })
+      .populate('patientId', 'fullName avatarUrl')
+      .populate('doctorId', 'fullName photoUrl')
+      .sort({ createdAt: -1 })
+      .exec();
+
+    return incomingCall;
+  }
 }

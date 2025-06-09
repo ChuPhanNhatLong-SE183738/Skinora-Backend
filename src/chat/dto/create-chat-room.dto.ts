@@ -1,26 +1,18 @@
-import { IsMongoId, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsMongoId } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateChatRoomDto {
-  @ApiProperty({
-    description: 'Patient ID',
-    example: '675abc123def456789012345',
-  })
+  @ApiProperty({ description: 'Patient user ID' })
   @IsMongoId()
+  @IsNotEmpty()
   patientId: string;
 
-  @ApiProperty({
-    description: 'Doctor ID',
-    example: '675def456abc789012345678',
-  })
+  @ApiProperty({ description: 'Doctor user ID' })
   @IsMongoId()
+  @IsNotEmpty()
   doctorId: string;
 
-  @ApiProperty({
-    description: 'Related appointment ID (optional)',
-    example: '675ghi789def012345678901',
-    required: false,
-  })
+  @ApiProperty({ description: 'Related appointment ID', required: false })
   @IsOptional()
   @IsMongoId()
   appointmentId?: string;
