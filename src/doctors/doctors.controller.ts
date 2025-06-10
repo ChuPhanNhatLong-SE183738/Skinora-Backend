@@ -25,6 +25,7 @@ import {
   ApiParam, 
   ApiBody 
 } from '@nestjs/swagger';
+import { DoctorLoginDto } from './dto/doctor-login.dto';
 
 @ApiTags('doctors')
 @Controller('doctors')

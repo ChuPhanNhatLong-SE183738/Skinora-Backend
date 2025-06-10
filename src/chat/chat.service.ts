@@ -234,13 +234,17 @@ export class ChatService {
       // Populate sender info for real-time broadcast
       const populatedMessage = await this.messageModel
         .findById(savedMessage._id)
-        .populate('senderId', 'fullName avatarUrl role')
+        .populate('senderId', 'fullName avatarUrl role email') // Add email for debug
         .exec();
 
       this.logger.log(`🔍 [DEBUG] Populated message:`, {
         id: populatedMessage?._id,
         senderId: populatedMessage?.senderId,
         senderIdPopulated: populatedMessage?.senderId ? 'YES' : 'NO',
+        senderIdOriginal: savedMessage.senderId,
+        collectionCheck: await this.checkUserExists(
+          savedMessage.senderId.toString(),
+        ),
       });
 
       // Update chat room's last message and activity
@@ -454,6 +458,36 @@ export class ChatService {
   private async sendToUser(userId: string, event: string, data: any) {
     if (this.chatGateway) {
       await this.chatGateway.sendToUser(userId, event, data);
+    }
+  }
+
+  // Add helper method to check if user exists
+  private async checkUserExists(userId: string): Promise<boolean> {
+    try {
+      // Check different possible user collections
+      const collections = ['users', 'doctors', 'User', 'Doctor'];
+      for (const collectionName of collections) {
+        try {
+          const count = await this.messageModel.db
+            .collection(collectionName)
+            .countDocuments({ _id: new Types.ObjectId(userId) });
+          if (count > 0) {
+            this.logger.log(
+              `✅ User ${userId} found in collection: ${collectionName}`,
+            );
+            return true;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Collection ${collectionName} not found or error: ${error.message}`,
+          );
+        }
+      }
+      this.logger.warn(`❌ User ${userId} not found in any user collection`);
+      return false;
+    } catch (error) {
+      this.logger.error(`❌ Error checking user existence: ${error.message}`);
+      return false;
     }
   }
 }

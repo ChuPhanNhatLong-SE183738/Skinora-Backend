@@ -660,18 +660,28 @@ export class ChatController {
   @ApiOperation({ summary: 'Debug: Get WebSocket connection status' })
   async debugWebSocketStatus() {
     try {
-      const connectedUsersCount =
-        this.chatGateway?.getConnectedUsersCount() || 0;
+      const uniqueUsersCount = this.chatGateway?.getConnectedUsersCount() || 0;
+      const totalConnectionsCount =
+        this.chatGateway?.getTotalConnectionsCount() || 0;
       const connectedUsers = this.chatGateway?.getConnectedUsers() || [];
+      const connectionDetails = this.chatGateway?.getConnectionDetails() || {};
 
       return {
         success: true,
         message: 'WebSocket status retrieved',
         data: {
           timestamp: new Date().toISOString(),
-          connectedUsersCount,
+          uniqueUsersCount,
+          totalConnectionsCount,
           connectedUsers,
+          connectionDetails,
           gatewayAvailable: !!this.chatGateway,
+          serverStatus: {
+            hasServer: !!(this.chatGateway as any)?.server,
+            hasAdapter: !!(this.chatGateway as any)?.server?.sockets?.adapter,
+            hasRooms: !!(this.chatGateway as any)?.server?.sockets?.adapter
+              ?.rooms,
+          },
         },
       };
     } catch (error) {
@@ -720,6 +730,221 @@ export class ChatController {
           roomId,
           membersCount,
           timestamp: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/room-members/:roomId')
+  @ApiOperation({ summary: 'Debug: Get room members info' })
+  async debugRoomMembers(@Param('roomId') roomId: string) {
+    try {
+      const totalConnections =
+        (await this.chatGateway?.getRoomMembersCount(roomId)) || 0;
+
+      // Get detailed info about connected users
+      const connectedUsers = this.chatGateway?.getConnectedUsers() || [];
+      const connectionDetails = this.chatGateway?.getConnectionDetails() || {};
+
+      return {
+        success: true,
+        message: 'Room members info retrieved',
+        data: {
+          roomId,
+          totalConnections,
+          connectedUsersGlobally: connectedUsers.length,
+          connectionDetails,
+          timestamp: new Date().toISOString(),
+          instructions: {
+            note: 'Multiple devices per user are now supported',
+            web: 'socket.emit("join_room", {roomId, userId})',
+            mobile: 'socket.emit("join_room", {roomId, userId})',
+            check: 'socket.emit("get_room_members", {roomId})',
+            events: '"new_message", "message_received", "room_members_info"',
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/test-socket')
+  @ApiOperation({ summary: 'Get socket test instructions' })
+  async getSocketTestInstructions() {
+    return {
+      success: true,
+      message: 'Socket test instructions',
+      data: {
+        step1: 'Open browser console and run this code:',
+        webCode: `
+// Copy and paste this in browser console:
+const socket = io('http://localhost:3000/chat', {
+  auth: { token: 'YOUR_JWT_TOKEN_HERE' },
+  transports: ['websocket', 'polling']
+});
+
+socket.on('connected', (data) => {
+  console.log('✅ Connected:', data);
+  socket.emit('join_room', { 
+    roomId: '68453485c28ff4899d2d5c82', 
+    userId: 'YOUR_USER_ID' 
+  });
+});
+
+socket.on('room_joined', (data) => {
+  console.log('🏠 Joined room:', data);
+  console.log('Room member count:', data.roomMemberCount);
+});
+
+socket.on('room_update', (data) => {
+  console.log('📊 Room update:', data);
+});
+
+socket.on('user_joined', (data) => {
+  console.log('👤 Someone joined:', data);
+});
+
+socket.on('new_message', (data) => {
+  console.log('📨 New message:', data);
+});
+
+socket.on('message_received', (data) => {
+  console.log('📨 Backup message:', data);
+});
+
+// Test room members
+socket.emit('get_room_members', { roomId: '68453485c28ff4899d2d5c82' });
+
+socket.on('room_members_info', (data) => {
+  console.log('👥 Room members:', data);
+});
+        `,
+        step2: 'Replace YOUR_JWT_TOKEN_HERE with your actual JWT token',
+        step3: 'Replace YOUR_USER_ID with your actual user ID',
+        step4: 'Run the code in console',
+        step5: 'Check if you see connection and room join events',
+        step6: 'Send a message from another device/browser tab',
+        userIds: {
+          patient: '683ec8811deabdaefb552180',
+          doctor: '684460f8fe31c80c380b343f',
+        },
+      },
+    };
+  }
+
+  @Get('debug/check-connections/:roomId')
+  @ApiOperation({ summary: 'Debug: Check who should be connected to room' })
+  async debugCheckConnections(@Param('roomId') roomId: string) {
+    try {
+      // Get room info from database
+      const chatRoom = await this.chatService.getChatRoom(roomId);
+      if (!chatRoom) {
+        return {
+          success: false,
+          message: 'Chat room not found',
+        };
+      }
+
+      // Get WebSocket connection status
+      const wsStatus =
+        (await this.chatGateway?.getRoomMembersCount(roomId)) || 0;
+      const connectedUsers = this.chatGateway?.getConnectedUsers() || [];
+      const connectionDetails = this.chatGateway?.getConnectionDetails() || {};
+
+      // Extract user IDs from chat room
+      const patientId = (chatRoom.patientId as any)?._id || chatRoom.patientId;
+      const doctorId = (chatRoom.doctorId as any)?._id || chatRoom.doctorId;
+
+      return {
+        success: true,
+        message: 'Connection status check',
+        data: {
+          roomId,
+          chatRoom: {
+            patientId: patientId.toString(),
+            doctorId: doctorId.toString(),
+            patientName: (chatRoom.patientId as any)?.fullName || 'Unknown',
+            doctorName: (chatRoom.doctorId as any)?.fullName || 'Unknown',
+          },
+          websocket: {
+            roomMemberCount: wsStatus,
+            globalConnectedUsers: connectedUsers.length,
+            connectionDetails,
+          },
+          shouldBeConnected: [patientId.toString(), doctorId.toString()],
+          actuallyConnected: connectedUsers,
+          missingConnections: [
+            patientId.toString(),
+            doctorId.toString(),
+          ].filter((id) => !connectedUsers.includes(id)),
+          instructions: {
+            patientShouldJoin: `socket.emit('join_room', {roomId: '${roomId}', userId: '${patientId}'})`,
+            doctorShouldJoin: `socket.emit('join_room', {roomId: '${roomId}', userId: '${doctorId}'})`,
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/connection-integrity')
+  @ApiOperation({ summary: 'Debug: Check connection integrity' })
+  async debugConnectionIntegrity() {
+    try {
+      const connectedUsers = this.chatGateway?.getConnectedUsers() || [];
+      const connectionDetails = this.chatGateway?.getConnectionDetails() || {};
+      const totalConnections =
+        this.chatGateway?.getTotalConnectionsCount() || 0;
+
+      // Check for anomalies
+      const anomalies: Array<{
+        userId: string;
+        deviceCount: number;
+        issue: string;
+      }> = [];
+
+      for (const [userId, details] of Object.entries(connectionDetails)) {
+        if ((details as any).deviceCount > 10) {
+          anomalies.push({
+            userId,
+            deviceCount: (details as any).deviceCount,
+            issue: 'Too many devices for one user',
+          });
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Connection integrity check',
+        data: {
+          totalUsers: connectedUsers.length,
+          totalConnections,
+          connectionDetails,
+          anomalies,
+          averageDevicesPerUser:
+            totalConnections / Math.max(connectedUsers.length, 1),
+          timestamp: new Date().toISOString(),
+          recommendations:
+            anomalies.length > 0
+              ? [
+                  'Consider restarting the server to clean up connections',
+                  'Check for connection leaks in client code',
+                  'Implement connection limits per user',
+                ]
+              : ['Connection state looks healthy'],
         },
       };
     } catch (error) {

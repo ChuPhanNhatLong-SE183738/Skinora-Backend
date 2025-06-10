@@ -1,10 +1,9 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
-@Schema({
-  timestamps: true,
-  collection: 'messages', // Explicitly set collection name
-})
+export type MessageDocument = Message & Document;
+
+@Schema({ timestamps: true })
 export class Message {
   @Prop({
     type: MongooseSchema.Types.ObjectId,
@@ -16,12 +15,8 @@ export class Message {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   senderId: Types.ObjectId;
 
-  @Prop({
-    type: String,
-    required: true,
-    enum: ['patient', 'doctor'],
-  })
-  senderType: 'patient' | 'doctor';
+  @Prop({ type: String, required: true, enum: ['patient', 'doctor'] })
+  senderType: string;
 
   @Prop({ type: String, required: true })
   content: string;
@@ -31,7 +26,7 @@ export class Message {
     enum: ['text', 'image', 'file'],
     default: 'text',
   })
-  messageType: 'text' | 'image' | 'file';
+  messageType: string;
 
   @Prop({ type: String })
   fileUrl: string;
@@ -39,7 +34,7 @@ export class Message {
   @Prop({ type: String })
   fileName: string;
 
-  @Prop({ type: [String] })
+  @Prop({ type: [String], default: [] })
   attachments: string[];
 
   @Prop({ type: Date, default: Date.now })
@@ -52,9 +47,8 @@ export class Message {
   isDeleted: boolean;
 }
 
-export type MessageDocument = Message & Document;
 export const MessageSchema = SchemaFactory.createForClass(Message);
 
-// Create indexes for better performance
+// Add indexes for better performance
 MessageSchema.index({ chatRoomId: 1, timestamp: -1 });
 MessageSchema.index({ senderId: 1 });

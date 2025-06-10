@@ -39,23 +39,32 @@ export class AppointmentsService {
    */
   async verifyUserSubscription(userId: string): Promise<string> {
     this.logger.log(`Verifying subscription for user: ${userId}`);
-    
+
     // Get current subscription
-    const subscription = await this.subscriptionService.getCurrentSubscription(userId);
-    
+    const subscription =
+      await this.subscriptionService.getCurrentSubscription(userId);
+
     // Check if subscription exists and is active
     if (!subscription) {
       this.logger.warn(`No active subscription found for user ${userId}`);
-      throw new BadRequestException('You need an active subscription to book appointments with doctors');
+      throw new BadRequestException(
+        'You need an active subscription to book appointments with doctors',
+      );
     }
-    
+
     // Check if user has meetings left in their subscription
     if (subscription.meetingsUsed >= subscription.meetingAmount) {
-      this.logger.warn(`User ${userId} has used all meetings in subscription (${subscription.meetingsUsed}/${subscription.meetingAmount})`);
-      throw new BadRequestException(`You have used all meetings in your current subscription (${subscription.meetingsUsed}/${subscription.meetingAmount}). Please upgrade your plan.`);
+      this.logger.warn(
+        `User ${userId} has used all meetings in subscription (${subscription.meetingsUsed}/${subscription.meetingAmount})`,
+      );
+      throw new BadRequestException(
+        `You have used all meetings in your current subscription (${subscription.meetingsUsed}/${subscription.meetingAmount}). Please upgrade your plan.`,
+      );
     }
-    
-    this.logger.log(`User ${userId} has a valid subscription with ${subscription.meetingAmount - subscription.meetingsUsed} meetings left`);
+
+    this.logger.log(
+      `User ${userId} has a valid subscription with ${subscription.meetingAmount - subscription.meetingsUsed} meetings left`,
+    );
     return (subscription as any)._id.toString(); // Return the subscription ID for later use
   }
 
@@ -64,26 +73,34 @@ export class AppointmentsService {
    */
   private verifyAppointmentTime(date: string, timeSlot: string): void {
     this.logger.log(`Verifying appointment time: ${date} ${timeSlot}`);
-    
-    const [hours, minutes] = timeSlot.split(':').map((num) => parseInt(num, 10));
+
+    const [hours, minutes] = timeSlot
+      .split(':')
+      .map((num) => parseInt(num, 10));
     const appointmentDateTime = new Date(date);
     appointmentDateTime.setHours(hours, minutes, 0, 0);
-    
+
     const now = new Date();
-    
+
     // Add a small buffer (e.g., 5 minutes) to prevent issues when appointment time is very close to current time
     const bufferMinutes = 5;
     const minimumValidTime = new Date();
     minimumValidTime.setMinutes(now.getMinutes() + bufferMinutes);
-    
+
     if (appointmentDateTime < minimumValidTime) {
       const formattedApptTime = appointmentDateTime.toLocaleString();
       const formattedNow = now.toLocaleString();
-      this.logger.warn(`Appointment time ${formattedApptTime} is in the past (current time: ${formattedNow})`);
-      throw new BadRequestException(`Cannot book appointments in the past or less than ${bufferMinutes} minutes from now. Selected time: ${formattedApptTime}, Current time: ${formattedNow}`);
+      this.logger.warn(
+        `Appointment time ${formattedApptTime} is in the past (current time: ${formattedNow})`,
+      );
+      throw new BadRequestException(
+        `Cannot book appointments in the past or less than ${bufferMinutes} minutes from now. Selected time: ${formattedApptTime}, Current time: ${formattedNow}`,
+      );
     }
-    
-    this.logger.log(`Appointment time validation passed for ${date} ${timeSlot}`);
+
+    this.logger.log(
+      `Appointment time validation passed for ${date} ${timeSlot}`,
+    );
   }
 
   async create(createAppointmentDto: CreateAppointmentDto) {
@@ -166,11 +183,7 @@ export class AppointmentsService {
         await this.chatService.createChatRoom({
           patientId: createAppointmentDto.userId,
           doctorId: createAppointmentDto.doctorId,
-<<<<<<< HEAD
           appointmentId: (savedAppointment._id as any).toString(),
-=======
-          appointmentId: savedAppointment.id.toString(),
->>>>>>> 5214123cbfa741d25382928cf104f4098b8416f0
         });
         this.logger.log(
           `Chat room created for appointment ${savedAppointment._id}`,
@@ -183,7 +196,9 @@ export class AppointmentsService {
       // Record meeting usage in subscription
       try {
         await this.subscriptionService.useMeeting(subscriptionId);
-        this.logger.log(`Meeting usage recorded in subscription: ${subscriptionId}`);
+        this.logger.log(
+          `Meeting usage recorded in subscription: ${subscriptionId}`,
+        );
       } catch (error) {
         this.logger.error(`Failed to record meeting usage: ${error.message}`);
         // Don't fail appointment creation if updating subscription fails
@@ -275,17 +290,16 @@ export class AppointmentsService {
   /**
    * Updates appointment status and handles related subscription meeting tracking
    */
-  async updateAppointmentStatus(id: string, status: 'scheduled' | 'completed' | 'cancelled') {
+  async updateAppointmentStatus(
+    id: string,
+    status: 'scheduled' | 'completed' | 'cancelled',
+  ) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid appointment ID format');
     }
 
     const appointment = await this.appointmentModel
-      .findByIdAndUpdate(
-        id, 
-        { appointmentStatus: status }, 
-        { new: true }
-      )
+      .findByIdAndUpdate(id, { appointmentStatus: status }, { new: true })
       .exec();
 
     if (!appointment) {
@@ -385,25 +399,31 @@ export class AppointmentsService {
         availableTimeSlots.splice(index, 1);
       }
     });
-    
+
     // Filter out time slots in the past
     const now = new Date();
-    const isToday = dateObj.setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
-    
+    const isToday =
+      dateObj.setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+
     if (isToday) {
       // Add a small buffer (e.g., 30 minutes) for upcoming appointments
       const bufferMinutes = 30;
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes() + bufferMinutes;
-      
-      const filteredTimeSlots = availableTimeSlots.filter(timeSlot => {
-        const [slotHour, slotMinute] = timeSlot.split(':').map(num => parseInt(num, 10));
-        if (slotHour > currentHour || (slotHour === currentHour && slotMinute > currentMinute)) {
+
+      const filteredTimeSlots = availableTimeSlots.filter((timeSlot) => {
+        const [slotHour, slotMinute] = timeSlot
+          .split(':')
+          .map((num) => parseInt(num, 10));
+        if (
+          slotHour > currentHour ||
+          (slotHour === currentHour && slotMinute > currentMinute)
+        ) {
           return true;
         }
         return false;
       });
-      
+
       return {
         available: filteredTimeSlots.length > 0,
         timeSlots: filteredTimeSlots,
@@ -610,15 +630,16 @@ export class AppointmentsService {
     }
 
     // Find call by appointmentId in calls table
-    const call = await this.callService.getCallByAppointmentId(appointmentId);
+    const activeCall =
+      await this.callService.getCallByAppointmentId(appointmentId);
 
-    if (!call) {
+    if (!activeCall) {
       throw new BadRequestException(
         'No active call found for this appointment',
       );
     }
 
-    if (call.status === 'ended') {
+    if (activeCall.status === 'ended') {
       throw new BadRequestException('Call has already ended');
     }
 
@@ -630,7 +651,9 @@ export class AppointmentsService {
     const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'tester';
 
     // Get call details
-    const call = await this.callService.getCallById(appointment.callId.toString());
+    const call = await this.callService.getCallById(
+      appointment.callId.toString(),
+    );
 
     if (!call) {
       throw new NotFoundException('Call not found');
