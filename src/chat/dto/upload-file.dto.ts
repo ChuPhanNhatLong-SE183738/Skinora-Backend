@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  IsArray,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UploadFileDto {
@@ -9,10 +15,40 @@ export class UploadFileDto {
 
   @ApiProperty({
     description: 'Message type',
-    enum: ['image', 'file'],
+    enum: ['text', 'image', 'file'],
     required: false,
   })
   @IsOptional()
-  @IsEnum(['image', 'file'])
-  messageType?: 'image' | 'file';
+  @IsEnum(['text', 'image', 'file'])
+  messageType?: 'text' | 'image' | 'file';
+
+  @ApiProperty({ description: 'Firebase file URL', required: false })
+  @IsOptional()
+  @IsString()
+  fileUrl?: string;
+
+  @ApiProperty({ description: 'File name', required: false })
+  @IsOptional()
+  @IsString()
+  fileName?: string;
+
+  @ApiProperty({ description: 'File size in bytes', required: false })
+  @IsOptional()
+  @IsNumber()
+  fileSize?: number;
+
+  @ApiProperty({ description: 'MIME type of the file', required: false })
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
+  @ApiProperty({
+    description: 'Array of Firebase attachment URLs',
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attachments?: string[];
 }

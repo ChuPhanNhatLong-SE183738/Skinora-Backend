@@ -503,6 +503,18 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // Method to send message to specific room
+  sendToRoom(roomId: string, event: string, data: any): void {
+    try {
+      this.server.to(`room_${roomId}`).emit(event, data);
+      this.logger.log(`📨 Sent ${event} to room ${roomId}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to send to room ${roomId}: ${error.message}`,
+      );
+    }
+  }
+
   // Method to send message to specific user (all devices) with better error handling
   async sendToUser(userId: string, event: string, data: any) {
     try {

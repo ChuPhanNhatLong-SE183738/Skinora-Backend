@@ -7,6 +7,7 @@ import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
 import { ChatRoom, ChatRoomSchema } from './entities/chat-room.entity';
 import { Message, MessageSchema } from './entities/message.entity';
+import { BlobHandlerService } from './services/blob-handler.service';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { Message, MessageSchema } from './entities/message.entity';
     }),
   ],
   controllers: [ChatController],
-  providers: [ChatService, ChatGateway],
+  providers: [ChatService, ChatGateway, BlobHandlerService],
   exports: [ChatService, ChatGateway],
 })
 export class ChatModule {}

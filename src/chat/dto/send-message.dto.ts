@@ -3,68 +3,147 @@ import {
   IsOptional,
   IsEnum,
   IsMongoId,
-  IsNotEmpty,
+  IsNumber,
+  IsArray,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class SendMessageDto {
   @ApiProperty({ description: 'Chat room ID', required: false })
   @IsOptional()
-  @IsMongoId({ message: 'roomId must be a valid MongoDB ObjectId' })
+  @IsMongoId()
+  chatRoomId?: string;
+
+  @ApiProperty({
+    description: 'Room ID (alternative field name)',
+    required: false,
+  })
+  @IsOptional()
+  @IsMongoId()
   roomId?: string;
 
-  @ApiProperty({ description: 'Sender user ID', required: false })
+  @ApiProperty({
+    description:
+      'Sender user ID (will be auto-extracted from JWT token if not provided)',
+    required: false,
+  })
   @IsOptional()
-  @IsMongoId({ message: 'senderId must be a valid MongoDB ObjectId' })
+  @IsMongoId()
   senderId?: string;
 
   @ApiProperty({
-    description: 'Sender type',
+    description:
+      'Sender type (will be auto-detected from user role if not provided)',
     enum: ['patient', 'doctor'],
     required: false,
   })
   @IsOptional()
-  @IsEnum(['patient', 'doctor'], {
-    message: 'senderType must be either patient or doctor',
-  })
+  @IsEnum(['patient', 'doctor'])
   senderType?: 'patient' | 'doctor';
 
-  @ApiProperty({ description: 'Message content' })
-  @IsString({ message: 'content must be a string' })
-  @IsNotEmpty({ message: 'content cannot be empty' })
+  @ApiProperty({ description: 'Message content/text' })
+  @IsString()
   content: string;
 
   @ApiProperty({
     description: 'Message type',
     enum: ['text', 'image', 'file'],
     required: false,
+    default: 'text',
   })
   @IsOptional()
   @IsEnum(['text', 'image', 'file'])
   messageType?: 'text' | 'image' | 'file';
 
-  @ApiProperty({
-    description: 'File URL if message type is image or file',
-    required: false,
-  })
+  @ApiProperty({ description: 'Firebase file URL', required: false })
   @IsOptional()
   @IsString()
   fileUrl?: string;
 
-  @ApiProperty({
-    description: 'File name if message type is file',
-    required: false,
-  })
+  @ApiProperty({ description: 'File name', required: false })
   @IsOptional()
   @IsString()
   fileName?: string;
 
+  @ApiProperty({ description: 'File size in bytes', required: false })
+  @IsOptional()
+  @IsNumber()
+  fileSize?: number;
+
+  @ApiProperty({ description: 'MIME type of the file', required: false })
+  @IsOptional()
+  @IsString()
+  mimeType?: string;
+
   @ApiProperty({
-    description: 'File attachments array',
+    description: 'Firebase attachment URLs',
+    required: false,
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  attachments?: string[];
+
+  // Cloudinary specific properties
+  @ApiProperty({
+    description: 'Original file name from upload',
     required: false,
   })
   @IsOptional()
-  attachments?: string[];
+  @IsString()
+  originalName?: string;
+
+  @ApiProperty({ description: 'Cloudinary public ID', required: false })
+  @IsOptional()
+  @IsString()
+  publicId?: string;
+
+  @ApiProperty({ description: 'Cloudinary asset ID', required: false })
+  @IsOptional()
+  @IsString()
+  assetId?: string;
+
+  @ApiProperty({ description: 'File format (jpg, png, etc.)', required: false })
+  @IsOptional()
+  @IsString()
+  format?: string;
+
+  @ApiProperty({
+    description: 'Resource type (image, video, etc.)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  resourceType?: string;
+
+  @ApiProperty({ description: 'Cloudinary version number', required: false })
+  @IsOptional()
+  @IsNumber()
+  version?: number;
+
+  @ApiProperty({ description: 'Image width in pixels', required: false })
+  @IsOptional()
+  @IsNumber()
+  width?: number;
+
+  @ApiProperty({ description: 'Image height in pixels', required: false })
+  @IsOptional()
+  @IsNumber()
+  height?: number;
+
+  @ApiProperty({ description: 'Cloudinary secure URL', required: false })
+  @IsOptional()
+  @IsString()
+  secure_url?: string;
+
+  @ApiProperty({
+    description: 'File size in bytes from Cloudinary',
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  bytes?: number;
 }
 
 // Create a separate DTO for the internal service method

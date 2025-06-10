@@ -639,16 +639,23 @@ export class AppointmentsService {
       );
     }
 
-    if (activeCall.status === 'ended') {
-      throw new BadRequestException('Call has already ended');
+    // Allow joining if call is pending, active, or connected
+    const allowedStatuses = ['pending', 'active', 'connected'];
+    if (!allowedStatuses.includes(activeCall.status)) {
+      throw new BadRequestException(
+        `Cannot join call with status: ${activeCall.status}`,
+      );
     }
 
-    // TODO: Add back authorization check later
-    // For testing: allow anyone to join
+    // Check authorization
     const isPatient = appointment.userId.toString() === userId;
     const isDoctor = appointment.doctorId.toString() === userId;
 
-    const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'tester';
+    if (!isPatient && !isDoctor) {
+      throw new BadRequestException('You are not authorized to join this call');
+    }
+
+    const userRole = isPatient ? 'patient' : 'doctor';
 
     // Get call details
     const call = await this.callService.getCallById(
@@ -659,13 +666,21 @@ export class AppointmentsService {
       throw new NotFoundException('Call not found');
     }
 
-    if (call.status === 'ended') {
-      throw new BadRequestException('Call has already ended');
+    // Update call status to active when someone joins
+    if (call.status === 'pending') {
+      await this.callService.updateCallStatus(
+        (call as any)._id.toString(),
+        'active',
+      );
     }
 
     // Generate new token for joining user
     const uid = Math.floor(Math.random() * 100000) + 1;
     const token = this.agoraService.generateRtcToken(call.roomId, uid);
+
+    this.logger.log(
+      `📞 User ${userId} (${userRole}) joining call ${(call as any)._id}`,
+    );
 
     return {
       appointment: {
@@ -674,15 +689,34 @@ export class AppointmentsService {
         endTime: appointment.endTime,
         status: appointment.appointmentStatus,
       },
+      // Agora configuration
       agoraAppId: this.agoraService.getAppId(),
-      otherParticipant: isPatient ? call.doctorId : call.patientId,
-      callStatus: call.status,
-      userRole,
-      uid,
-      token,
+      appId: this.agoraService.getAppId(), // Backup field name
       channelName: call.roomId,
-      callId: call._id,
-      message: 'Ready to join video call - Testing Mode',
+      token: token,
+      patientToken: token, // For compatibility
+      doctorToken: token, // For compatibility
+      uid: uid,
+
+      // Call details
+      callId: (call as any)._id,
+      callStatus: 'active', // Return active status
+      roomId: call.roomId,
+      userRole,
+      otherParticipant: isPatient ? call.doctorId : call.patientId,
+
+      // Status
+      canJoin: true,
+      message: `Ready to join video call as ${userRole}`,
+
+      // Debug info
+      debug: {
+        hasAgoraAppId: !!this.agoraService.getAppId(),
+        hasToken: !!token,
+        hasChannelName: !!call.roomId,
+        generatedUid: uid,
+        originalCallStatus: call.status,
+      },
     };
   }
 
@@ -737,7 +771,7 @@ export class AppointmentsService {
       });
 
       return {
-        callId: callResult._id,
+        callId: (callResult as any)._id,
         duration: callResult.duration,
         endTime: callResult.endTime,
         status: callResult.status,

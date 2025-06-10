@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { RedisService } from './redis.service';
 
 @Injectable()
 @WebSocketGateway({
@@ -26,8 +27,12 @@ export class CallWebSocketGateway
   server: Server;
 
   private readonly logger = new Logger(CallWebSocketGateway.name);
+  private connectedSockets = new Map<string, any[]>(); // userId -> [sockets]
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    private readonly redisService: RedisService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
@@ -123,5 +128,51 @@ export class CallWebSocketGateway
       reason: 'user_declined',
       timestamp: new Date(),
     });
+  }
+
+  async notifyParticipantJoined(
+    callId: string,
+    participantInfo: {
+      userId: string;
+      userRole: string;
+      device: string;
+      joinedAt: Date;
+    },
+  ): Promise<void> {
+    try {
+      // Get all participants to notify
+      const participants = await this.redisService.getCallParticipants(callId);
+
+      // Notify all other participants
+      for (const participant of participants) {
+        if (
+          participant.userId !== participantInfo.userId ||
+          participant.device !== participantInfo.device
+        ) {
+          // Send notification to other participants
+          const sockets = await this.getSocketsByUserId(participant.userId);
+          sockets.forEach((socket) => {
+            socket.emit('participant_joined', {
+              callId,
+              newParticipant: participantInfo,
+              totalParticipants: participants.length + 1,
+              timestamp: new Date(),
+            });
+          });
+        }
+      }
+
+      console.log(
+        `📢 Notified participants about ${participantInfo.device} device joining call ${callId}`,
+      );
+    } catch (error) {
+      console.error('Error notifying participant joined:', error);
+    }
+  }
+
+  // Mock method to get sockets by user ID
+  private async getSocketsByUserId(userId: string): Promise<any[]> {
+    // Mock implementation - return empty array for now
+    return this.connectedSockets.get(userId) || [];
   }
 }

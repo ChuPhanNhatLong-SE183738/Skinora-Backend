@@ -1,8 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Schema as MongooseSchema, Types } from 'mongoose';
 
-export type MessageDocument = Message & Document;
-
 @Schema({ timestamps: true })
 export class Message {
   @Prop({
@@ -15,11 +13,8 @@ export class Message {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
   senderId: Types.ObjectId;
 
-  @Prop({ type: String, required: true, enum: ['patient', 'doctor'] })
-  senderType: string;
-
-  @Prop({ type: String, required: true })
-  content: string;
+  @Prop({ required: true })
+  messageText: string;
 
   @Prop({
     type: String,
@@ -28,25 +23,38 @@ export class Message {
   })
   messageType: string;
 
-  @Prop({ type: String })
+  @Prop()
   fileUrl: string;
 
-  @Prop({ type: String })
+  @Prop({ type: [String] }) // Array of file URLs for multiple attachments
+  attachments: string[];
+
+  @Prop() // Original filename
   fileName: string;
 
-  @Prop({ type: [String], default: [] })
-  attachments: string[];
+  @Prop() // File size in bytes
+  fileSize: number;
+
+  @Prop() // File MIME type
+  mimeType: string;
 
   @Prop({ type: Date, default: Date.now })
   timestamp: Date;
 
+  @Prop({ type: Date, default: Date.now })
+  createdAt: Date;
+
+  @Prop({ type: Date, default: Date.now })
+  updatedAt: Date;
+
+  @Prop({ type: Date })
+  readAt?: Date;
+
   @Prop({ type: Boolean, default: false })
   isRead: boolean;
-
-  @Prop({ type: Boolean, default: false })
-  isDeleted: boolean;
 }
 
+export type MessageDocument = Message & Document;
 export const MessageSchema = SchemaFactory.createForClass(Message);
 
 // Add indexes for better performance

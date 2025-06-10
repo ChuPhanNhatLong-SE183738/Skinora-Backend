@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Request,
+  Logger,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -27,6 +28,8 @@ import { RedisService } from '../websocket/redis.service';
 @ApiTags('calls')
 @Controller('calls')
 export class CallController {
+  private readonly logger = new Logger(CallController.name);
+
   constructor(
     private readonly callService: CallService,
     private readonly agoraService: AgoraService,
@@ -232,7 +235,23 @@ export class CallController {
         success: true,
         message: 'Call details retrieved successfully',
         data: {
-          ...call.toObject(),
+          _id: (call as any)._id,
+          patientId: call.patientId,
+          doctorId: call.doctorId,
+          appointmentId: call.appointmentId,
+          roomId: call.roomId,
+          callType: call.callType,
+          status: call.status,
+          startTime: call.startTime,
+          endTime: call.endTime,
+          duration: call.duration,
+          initiatedBy: call.initiatedBy,
+          endReason: call.endReason,
+          notes: call.notes,
+          agoraConfig: call.agoraConfig,
+          createdAt: (call as any).createdAt,
+          updatedAt: (call as any).updatedAt,
+          // Add Agora info
           agoraAppId: this.agoraService.getAppId(),
           token,
           uid,
@@ -1639,10 +1658,23 @@ joinChannel();
     try {
       const userId = req.user.sub || req.user.id;
 
-      // Update call status
-      const call = await this.callService.updateCallStatus(callId, 'active');
+      // Get call details first
+      const call = await this.callService.getCallById(callId);
 
       if (!call) {
+        return {
+          success: false,
+          message: 'Call not found',
+        };
+      }
+
+      // Update call status
+      const updatedCall = await this.callService.updateCallStatus(
+        callId,
+        'active',
+      );
+
+      if (!updatedCall) {
         return {
           success: false,
           message: 'Call not found or already ended',
@@ -1658,13 +1690,16 @@ joinChannel();
       // Generate fresh token
       const uid = Math.floor(Math.random() * 100000) + 1;
       const token = this.agoraService.generateValidatedToken(
-        call.roomId,
+        updatedCall.roomId,
         uid,
         24,
       );
 
       // Get other participant ID
-      const otherParticipantId = this.getOtherParticipantId(call, userId);
+      const otherParticipantId = this.getOtherParticipantId(
+        updatedCall,
+        userId,
+      );
 
       // Notify caller via WebSocket
       await this.webSocketGateway.notifyCallAccepted(
@@ -1677,16 +1712,22 @@ joinChannel();
         success: true,
         message: 'Call accepted successfully',
         data: {
-          callId: call._id,
-          status: call.status,
+          callId: (updatedCall as any)._id,
+          status: updatedCall.status,
+          appointmentId: updatedCall.appointmentId || null, // Include appointmentId
           joinInfo: {
             agoraAppId: this.agoraService.getAppId(),
+            appId: this.agoraService.getAppId(), // Add backup field
             token,
-            channelName: call.roomId,
+            channelName: updatedCall.roomId,
             uid,
-            userRole: this.determineUserRole(call, userId),
+            userRole: this.determineUserRole(updatedCall, userId),
           },
-          otherParticipant: this.getOtherParticipantInfo(call, userId),
+          otherParticipant: this.getOtherParticipantInfo(updatedCall, userId),
+          // Add mobile compatibility fields
+          agoraAppId: this.agoraService.getAppId(),
+          channelName: updatedCall.roomId,
+          userRole: this.determineUserRole(updatedCall, userId),
         },
       };
     } catch (error) {
@@ -1735,7 +1776,7 @@ joinChannel();
         success: true,
         message: 'Call declined successfully',
         data: {
-          callId: call._id,
+          callId: (call as any)._id,
           status: call.status,
           declinedBy: userId,
           reason: 'user_declined',
@@ -1805,6 +1846,288 @@ joinChannel();
         success: false,
         message: 'Failed to get real-time participants',
         error: error.message,
+      };
+    }
+  }
+
+  @Post(':id/join')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Join existing call (for mobile/second device)' })
+  @ApiParam({ name: 'id', description: 'Call ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Successfully joined call',
+    schema: {
+      example: {
+        success: true,
+        message: 'Successfully joined call',
+        data: {
+          callId: '6844721a12247c8cda556d07',
+          agoraAppId: 'your-agora-app-id',
+          token: 'new-agora-rtc-token',
+          channelName: 'skinora_call_6844721a12247c8cda556d07',
+          uid: 54321,
+          userRole: 'patient',
+          callStatus: 'active',
+          appointmentId: '684469608d16d2b432763e6a', // Include appointmentId
+          otherParticipant: {
+            _id: '684460f8fe31c80c380b343f',
+            fullName: 'Dr. Smith',
+            photoUrl: 'doctor-avatar.jpg',
+            role: 'doctor',
+          },
+          joinedAt: '2025-01-06T15:30:00.000Z',
+        },
+      },
+    },
+  })
+  async joinExistingCall(@Param('id') callId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      if (!userId) {
+        return {
+          success: false,
+          message: 'User ID not found in token',
+        };
+      }
+
+      // Get call details with populated appointment info
+      const call = await this.callService.getCallById(callId);
+
+      if (!call) {
+        return {
+          success: false,
+          message: 'Call not found',
+        };
+      }
+
+      // Check if call is still active/joinable
+      const allowedStatuses = ['pending', 'active', 'connected', 'ringing'];
+      if (!allowedStatuses.includes(call.status)) {
+        return {
+          success: false,
+          message: `Cannot join call with status: ${call.status}`,
+        };
+      }
+
+      // Extract participant IDs safely
+      let patientId: string;
+      let doctorId: string;
+
+      if (
+        call.patientId &&
+        typeof call.patientId === 'object' &&
+        (call.patientId as any)._id
+      ) {
+        patientId = (call.patientId as any)._id.toString();
+      } else if (call.patientId) {
+        patientId = call.patientId.toString();
+      } else {
+        patientId = '';
+      }
+
+      if (
+        call.doctorId &&
+        typeof call.doctorId === 'object' &&
+        (call.doctorId as any)._id
+      ) {
+        doctorId = (call.doctorId as any)._id.toString();
+      } else if (call.doctorId) {
+        doctorId = call.doctorId.toString();
+      } else {
+        // Try to get from raw call data
+        const rawCall = await this.callService.getCallByIdRaw(callId);
+        doctorId = rawCall?.doctorId?.toString() || '';
+      }
+
+      // Check authorization
+      const isPatient = patientId === userId;
+      const isDoctor = doctorId === userId;
+
+      if (!isPatient && !isDoctor) {
+        return {
+          success: false,
+          message: 'You are not authorized to join this call',
+        };
+      }
+
+      const userRole = isPatient ? 'patient' : 'doctor';
+
+      // Update call status to active if it was pending
+      if (call.status === 'pending' || call.status === 'ringing') {
+        await this.callService.updateCallStatus(callId, 'active');
+      }
+
+      // Generate new token for joining user (different UID from web)
+      const uid = Math.floor(Math.random() * 100000) + 200000; // Different range for mobile
+      let token: string;
+
+      try {
+        token = this.agoraService.generateValidatedToken(call.roomId, uid, 24);
+      } catch (tokenError) {
+        console.error('Token generation failed for mobile join:', tokenError);
+        return {
+          success: false,
+          message: `Failed to generate Agora token: ${tokenError.message}`,
+        };
+      }
+
+      // Get other participant info
+      let otherParticipant: any;
+      if (isPatient) {
+        otherParticipant =
+          call.doctorId && typeof call.doctorId === 'object'
+            ? {
+                _id: (call.doctorId as any)._id,
+                fullName: (call.doctorId as any).fullName || 'Unknown Doctor',
+                photoUrl: (call.doctorId as any).photoUrl || null,
+                role: 'doctor',
+              }
+            : { _id: doctorId, fullName: 'Unknown Doctor', role: 'doctor' };
+      } else {
+        otherParticipant =
+          call.patientId && typeof call.patientId === 'object'
+            ? {
+                _id: (call.patientId as any)._id,
+                fullName: (call.patientId as any).fullName || 'Unknown Patient',
+                avatarUrl: (call.patientId as any).avatarUrl || null,
+                role: 'patient',
+              }
+            : { _id: patientId, fullName: 'Unknown Patient', role: 'patient' };
+      }
+
+      // Update Redis cache for real-time tracking
+      await this.redisService.addCallParticipant(callId, {
+        userId,
+        userRole,
+        device: 'mobile',
+        uid,
+        joinedAt: new Date(),
+        status: 'joined',
+      });
+
+      // Notify other participants via WebSocket
+      await this.webSocketGateway.notifyParticipantJoined(callId, {
+        userId,
+        userRole,
+        device: 'mobile',
+        joinedAt: new Date(),
+      });
+
+      this.logger.log(
+        `📱 Mobile user ${userId} (${userRole}) joined call ${callId} with UID ${uid}`,
+      );
+
+      return {
+        success: true,
+        message: 'Successfully joined call',
+        data: {
+          callId: (call as any)._id,
+          agoraAppId: this.agoraService.getAppId(),
+          appId: this.agoraService.getAppId(), // Add backup field
+          token,
+          channelName: call.roomId,
+          uid,
+          userRole,
+          callStatus: 'active',
+          appointmentId: call.appointmentId || null, // Include appointmentId from call
+          otherParticipant,
+          joinedAt: new Date().toISOString(),
+          device: 'mobile',
+          instructions: {
+            note: 'Use the same channelName as web to join the same call',
+            webChannelName: call.roomId,
+            mobileUID: uid,
+            tokenExpiry: '24 hours',
+          },
+          // Add debug info
+          debug: {
+            hasAgoraAppId: !!this.agoraService.getAppId(),
+            hasToken: !!token,
+            hasChannelName: !!call.roomId,
+            generatedUid: uid,
+            callFromAppointment: !!call.appointmentId,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('Error joining existing call:', error);
+      return {
+        success: false,
+        message: error.message || 'Failed to join call',
+      };
+    }
+  }
+
+  @Get(':id/participants')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get all participants in call (web + mobile)' })
+  @ApiParam({ name: 'id', description: 'Call ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Call participants retrieved',
+    schema: {
+      example: {
+        success: true,
+        message: 'Call participants retrieved',
+        data: {
+          callId: '6844721a12247c8cda556d07',
+          totalParticipants: 2,
+          participants: [
+            {
+              userId: '683ec8811deabdaefb552180',
+              userRole: 'patient',
+              device: 'web',
+              uid: 12345,
+              joinedAt: '2025-01-06T15:25:00.000Z',
+              status: 'joined',
+            },
+            {
+              userId: '683ec8811deabdaefb552180',
+              userRole: 'patient',
+              device: 'mobile',
+              uid: 254321,
+              joinedAt: '2025-01-06T15:30:00.000Z',
+              status: 'joined',
+            },
+          ],
+        },
+      },
+    },
+  })
+  async getCallParticipants(@Param('id') callId: string, @Request() req) {
+    try {
+      const participants = await this.redisService.getCallParticipants(callId);
+      const call = await this.callService.getCallById(callId);
+
+      if (!call) {
+        return {
+          success: false,
+          message: 'Call not found',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Call participants retrieved',
+        data: {
+          callId,
+          callStatus: call.status,
+          totalParticipants: participants.length,
+          participants,
+          devices: {
+            web: participants.filter((p) => p.device === 'web').length,
+            mobile: participants.filter((p) => p.device === 'mobile').length,
+          },
+          uniqueUsers: [...new Set(participants.map((p) => p.userId))].length,
+        },
+      };
+    } catch (error) {
+      console.error('Error getting call participants:', error);
+      return {
+        success: false,
+        message: error.message || 'Failed to get participants',
       };
     }
   }
@@ -1879,5 +2202,107 @@ joinChannel();
     // Implement SMS notification (Twilio, etc.)
     console.log(`📱 SMS sent to user ${userId}: ${message}`);
     return { status: 'fulfilled', channel: 'sms' };
+  }
+
+  @Get('debug/agora-config')
+  @ApiOperation({ summary: 'Debug: Check Agora configuration' })
+  async debugAgoraConfig() {
+    try {
+      const configStatus = this.agoraService.getConfigurationStatus();
+
+      return {
+        success: true,
+        message: 'Agora configuration check',
+        data: {
+          timestamp: new Date().toISOString(),
+          configuration: configStatus,
+          validation: {
+            hasRequiredFields:
+              configStatus.hasAppId && configStatus.hasAppCertificate,
+            appIdFormat: configStatus.appIdLength === 32 ? 'VALID' : 'INVALID',
+            appCertificateFormat:
+              configStatus.appCertificateLength === 32 ? 'VALID' : 'INVALID',
+            overallStatus: configStatus.isConfigured
+              ? 'READY'
+              : 'NOT_CONFIGURED',
+          },
+          recommendations: !configStatus.isConfigured
+            ? [
+                'Set AGORA_APP_ID in environment variables',
+                'Set AGORA_APP_CERTIFICATE in environment variables',
+                'Ensure both values are 32-character strings',
+              ]
+            : ['Agora configuration is valid'],
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/comprehensive-test')
+  @ApiOperation({ summary: 'Comprehensive Agora system test' })
+  async comprehensiveTest() {
+    try {
+      const configStatus = this.agoraService.getConfigurationStatus();
+
+      if (!configStatus.isConfigured) {
+        return {
+          success: false,
+          message: 'Agora not configured properly',
+          data: { configStatus },
+        };
+      }
+
+      // 1. Test token generation
+      const testUid = Math.floor(Math.random() * 100000) + 1;
+      let testToken: string;
+      try {
+        testToken = this.agoraService.generateValidatedToken(
+          'test_channel_comprehensive_' + Date.now(),
+          testUid,
+          1, // 1 hour expiry for testing
+        );
+      } catch (error) {
+        return {
+          success: false,
+          message: 'Token generation failed',
+          error: error.message,
+        };
+      }
+
+      // 2. Validate Agora credentials
+      const verification = this.agoraService.validateAgoraCredentials();
+
+      if (verification.overall !== 'VALID') {
+        return {
+          success: false,
+          message: 'Agora credentials validation failed',
+          data: { verification },
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Comprehensive test passed',
+        data: {
+          configStatus,
+          token: {
+            uid: testUid,
+            token: testToken,
+            expiration: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          },
+          agoraCredentials: verification,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
   }
 }

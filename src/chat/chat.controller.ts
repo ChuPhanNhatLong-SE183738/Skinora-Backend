@@ -203,6 +203,7 @@ export class ChatController {
         senderType,
         messageContent: sendMessageDto.content,
         messageType: sendMessageDto.messageType,
+        bodyReceived: sendMessageDto,
       });
 
       // Validate required parameters
@@ -214,18 +215,28 @@ export class ChatController {
         throw new BadRequestException('Invalid userId from JWT token');
       }
 
-      // Call with 4 parameters: (roomId, userId, senderType, sendMessageDto)
+      // Ensure required fields are set for validation
+      if (!sendMessageDto.content) {
+        throw new BadRequestException('Message content is required');
+      }
+
+      // Set the IDs from URL parameter and JWT token - but don't overwrite if already set
+      sendMessageDto.chatRoomId = sendMessageDto.chatRoomId || roomId;
+      sendMessageDto.roomId = sendMessageDto.roomId || roomId;
+      sendMessageDto.senderId = sendMessageDto.senderId || userId;
+      sendMessageDto.senderType = sendMessageDto.senderType || senderType;
+
+      // Call with simplified signature: (roomId, userId, sendMessageDto)
       const result = await this.chatService.sendMessage(
         roomId,
         userId,
-        senderType,
         sendMessageDto,
       );
 
       return {
         success: true,
         message: 'Message sent successfully',
-        data: result.data,
+        data: result.data || result,
       };
     } catch (error) {
       this.logger.error(`❌ Error in sendMessage controller:`, {
@@ -234,6 +245,103 @@ export class ChatController {
         roomId,
         userId: req.user?.sub || req.user?.id,
         reqUser: req.user,
+        body: sendMessageDto,
+      });
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post('rooms/:roomId/send-with-data')
+  @ApiOperation({
+    summary: 'Send message with file data (handles blob URLs)',
+    description:
+      'Enhanced endpoint that can process file data for blob URL conversion while maintaining frontend compatibility',
+  })
+  @ApiParam({ name: 'roomId', description: 'Chat room ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Message with file data sent successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Message sent successfully',
+        data: {
+          _id: '676789xyz...',
+          messageText: 'Here is the document',
+          messageType: 'file',
+          fileUrl: '/uploads/chat/uuid-filename.pdf',
+          fileName: 'document.pdf',
+          fileSize: 1024,
+          mimeType: 'application/pdf',
+          attachments: ['/uploads/chat/uuid-filename.pdf'],
+          timestamp: '2025-01-06T12:00:00.000Z',
+        },
+      },
+    },
+  })
+  async sendMessageWithData(
+    @Param('roomId') roomId: string,
+    @Request() req,
+    @Body() sendMessageDto: SendMessageDto,
+  ) {
+    try {
+      const userId = req.user.sub || req.user.id;
+      const senderType = req.user.role === 'doctor' ? 'doctor' : 'patient';
+
+      this.logger.log(`🔍 [DEBUG] Controller sendMessageWithData:`, {
+        roomId,
+        userId,
+        senderType,
+        messageContent: sendMessageDto.content,
+        messageType: sendMessageDto.messageType,
+        hasAttachments: !!sendMessageDto.attachments?.length,
+        hasFileData:
+          !!sendMessageDto.fileUrl || !!sendMessageDto.attachments?.length,
+        attachments: sendMessageDto.attachments,
+        fileDataCount:
+          sendMessageDto.attachments?.length ||
+          (sendMessageDto.fileUrl ? 1 : 0),
+      });
+
+      // Validate required parameters
+      if (!roomId || roomId === 'undefined') {
+        throw new BadRequestException('Invalid roomId from URL parameter');
+      }
+      if (!userId || userId === 'undefined') {
+        throw new BadRequestException('Invalid userId from JWT token');
+      }
+      if (!sendMessageDto.content) {
+        throw new BadRequestException('Message content is required');
+      }
+
+      // Set the IDs from URL parameter and JWT token
+      sendMessageDto.chatRoomId = sendMessageDto.chatRoomId || roomId;
+      sendMessageDto.roomId = sendMessageDto.roomId || roomId;
+      sendMessageDto.senderId = sendMessageDto.senderId || userId;
+      sendMessageDto.senderType = sendMessageDto.senderType || senderType;
+
+      // Call the service method (which will internally process attachments and file data)
+      const result = await this.chatService.sendMessage(
+        roomId,
+        userId,
+        sendMessageDto,
+      );
+
+      return {
+        success: true,
+        message: 'Message with file data sent successfully',
+        data: result.data || result,
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error in sendMessageWithData controller:`, {
+        error: error.message,
+        stack: error.stack,
+        roomId,
+        userId: req.user?.sub || req.user?.id,
+        body: sendMessageDto,
       });
       return {
         success: false,
@@ -291,14 +399,22 @@ export class ChatController {
       const userType = req.user.role === 'doctor' ? 'doctor' : 'patient';
 
       this.logger.log(
-        `🔍 [DEBUG] Getting messages for room: ${roomId}, user: ${userId}, type: ${userType}`,
+        `🔍 [DEBUG] Getting messages for room: ${roomId}, user: ${userId}, type: ${userType}, page: ${page}, limit: ${limit}`,
+      );
+
+      // Convert page to number and ensure it's at least 1
+      const pageNum = Math.max(1, Number(page) || 1);
+      const limitNum = Math.max(1, Math.min(100, Number(limit) || 50)); // Max 100 messages per request
+
+      this.logger.log(
+        `🔍 [DEBUG] Sanitized params - page: ${pageNum}, limit: ${limitNum}`,
       );
 
       // Call service method that queries the "message" collection directly
       const messages = await this.chatService.getMessages(
         roomId,
-        +page,
-        +limit,
+        pageNum,
+        limitNum,
       );
 
       this.logger.log(`📊 [DEBUG] Found ${messages.length} messages`);
@@ -307,6 +423,11 @@ export class ChatController {
         success: true,
         message: 'Messages retrieved successfully',
         data: messages,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          hasMore: messages.length === limitNum, // Simple check
+        },
       };
     } catch (error) {
       this.logger.error(`❌ Error getting messages: ${error.message}`);
@@ -320,21 +441,11 @@ export class ChatController {
   @Patch('rooms/:roomId/read')
   @ApiOperation({ summary: 'Mark messages as read in chat room' })
   @ApiParam({ name: 'roomId', description: 'Chat room ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Messages marked as read successfully',
-    schema: {
-      example: {
-        success: true,
-        message: 'Messages marked as read successfully',
-      },
-    },
-  })
   async markMessagesAsRead(@Param('roomId') roomId: string, @Request() req) {
     const userId = req.user.sub || req.user.id;
-    const userType = req.user.role === 'doctor' ? 'doctor' : 'patient';
 
-    await this.chatService.markMessagesAsRead(roomId, userId, userType);
+    // Remove the third parameter as service only expects 2
+    await this.chatService.markMessagesAsRead(roomId, userId);
 
     return {
       success: true,
@@ -451,36 +562,56 @@ export class ChatController {
           ? 'image'
           : 'file');
 
+      // Create descriptive content with file names
+      const fileNames = files.map((f) => f.originalname).join(', ');
       const content =
         uploadFileDto.content ||
-        (messageType === 'image' ? '📷 Shared an image' : '📎 Shared a file');
+        (messageType === 'image' ? `📷 ${fileNames}` : `📎 ${fileNames}`);
 
-      const sendMessageDto: SendMessageDto = {
-        roomId: roomId,
-        senderId: userId,
-        senderType: senderType,
-        content,
-        messageType: messageType as 'text' | 'image' | 'file',
-        attachments,
-      };
+      this.logger.log(
+        `📤 Uploading ${files.length} files for user ${userId} to room ${roomId}`,
+      );
 
-      const message = await this.chatService.sendMessage(
+      // Use the first file for main file info
+      const mainFile = files[0];
+      const totalFileSize = files.reduce((total, file) => total + file.size, 0);
+
+      this.logger.log(`🔍 Calling sendMessageInternal with:`, {
         roomId,
         userId,
-        senderType,
-        sendMessageDto,
+        content,
+        messageType,
+        fileUrl: attachments[0],
+        fileName: fileNames,
+        fileSize: totalFileSize,
+        mimeType: mainFile.mimetype,
+        attachments,
+      });
+
+      // Call sendMessageInternal directly with all parameters properly passed
+      const message = await this.chatService.sendMessageInternal(
+        roomId, // chatRoomId
+        userId, // senderId
+        content, // messageText
+        messageType as 'text' | 'image' | 'file', // messageType
+        attachments[0], // fileUrl (primary file URL)
+        fileNames, // fileName (combined file names)
+        totalFileSize, // fileSize (total file size)
+        mainFile.mimetype, // mimeType (primary file MIME type)
+        attachments, // attachments (all file URLs)
       );
 
       return {
         success: true,
         message: 'Files uploaded and message sent successfully',
         data: {
-          message,
-          uploadedFiles: files.map((file) => ({
+          message: message,
+          uploadedFiles: files.map((file, index) => ({
             originalName: file.originalname,
             filename: file.filename,
             size: file.size,
-            url: `${req.protocol}://${req.get('host')}/uploads/chat/${file.filename}`,
+            mimeType: file.mimetype,
+            url: attachments[index],
           })),
         },
       };
@@ -539,38 +670,58 @@ export class ChatController {
 
       const imageUrl = `${req.protocol}://${req.get('host')}/uploads/chat/images/${file.filename}`;
 
-      const sendMessageDto: SendMessageDto = {
-        roomId: roomId,
-        senderId: userId,
-        senderType: senderType,
-        content: uploadFileDto.content || '📷 Shared an image',
-        messageType: 'image',
-        attachments: [imageUrl],
-      };
+      this.logger.log(
+        `📤 Uploading image for user ${userId} to room ${roomId}: ${imageUrl}`,
+      );
 
-      const message = await this.chatService.sendMessage(
+      // Create descriptive message content with file info
+      const messageContent = uploadFileDto.content || `📷 ${file.originalname}`;
+
+      this.logger.log(`🔍 Calling sendMessageInternal with:`, {
         roomId,
         userId,
-        senderType,
-        sendMessageDto,
+        messageContent,
+        messageType: 'image',
+        fileUrl: imageUrl,
+        originalName: file.originalname,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        attachments: [imageUrl],
+      });
+
+      // Call sendMessageInternal directly with all parameters properly passed
+      const message = await this.chatService.sendMessageInternal(
+        roomId, // chatRoomId
+        userId, // senderId
+        messageContent, // messageText
+        'image', // messageType
+        imageUrl, // fileUrl
+        file.originalname, // fileName
+        file.size, // fileSize
+        file.mimetype, // mimeType
+        [imageUrl], // attachments array
       );
+
+      this.logger.log(`📨 Image message sent successfully:`, message);
 
       return {
         success: true,
         message: 'Image uploaded and sent successfully',
         data: {
-          message,
+          message: message,
           imageUrl,
           uploadedFile: {
             originalName: file.originalname,
             filename: file.filename,
             size: file.size,
+            mimeType: file.mimetype,
             url: imageUrl,
           },
         },
       };
     } catch (error) {
       this.logger.error(`❌ Error uploading image: ${error.message}`);
+      this.logger.error(`❌ Error stack:`, error.stack);
       return {
         success: false,
         message: error.message,
@@ -612,12 +763,51 @@ export class ChatController {
     @Body() sendMessageDto: SendMessageDto,
   ) {
     try {
-      const userId = req.user.sub || req.user.id;
+      // Extract doctorId from JWT payload
+      const senderId = req.user.doctorId || req.user.sub || req.user.id;
       const senderType = 'doctor';
+
+      this.logger.log(`🔍 [DEBUG] sendMessageToPatient:`, {
+        jwtPayload: req.user,
+        extractedUserId: senderId,
+        senderType,
+        sendMessageDto,
+      });
+
+      // Validate userId
+      if (!senderId) {
+        this.logger.error(`❌ Could not extract doctorId from JWT:`, req.user);
+        throw new BadRequestException('Doctor ID not found in token');
+      }
+
+      // Validate required fields
+      if (!sendMessageDto.content) {
+        throw new BadRequestException('Message content is required');
+      }
+
+      if (!sendMessageDto.chatRoomId && !sendMessageDto.roomId) {
+        throw new BadRequestException('Chat room ID is required');
+      }
+
+      // Set up the DTO with extracted values
+      sendMessageDto.senderId = sendMessageDto.senderId || senderId;
+      sendMessageDto.senderType = sendMessageDto.senderType || senderType;
+
+      // Ensure chatRoomId is set
+      if (!sendMessageDto.chatRoomId && sendMessageDto.roomId) {
+        sendMessageDto.chatRoomId = sendMessageDto.roomId;
+      }
+
+      this.logger.log(`🔍 [DEBUG] Final DTO:`, {
+        chatRoomId: sendMessageDto.chatRoomId,
+        senderId: sendMessageDto.senderId,
+        senderType: sendMessageDto.senderType,
+        content: sendMessageDto.content,
+      });
 
       // Call with 3 parameters: (userId, senderType, sendMessageDto)
       const result = await this.chatService.sendMessage(
-        userId,
+        senderId,
         senderType,
         sendMessageDto,
       );
@@ -945,6 +1135,46 @@ socket.on('room_members_info', (data) => {
                   'Implement connection limits per user',
                 ]
               : ['Connection state looks healthy'],
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Get('debug/messages/:roomId')
+  @ApiOperation({ summary: 'Debug: Get raw messages from database' })
+  async debugMessages(@Param('roomId') roomId: string) {
+    try {
+      // Direct database query without pagination
+      const messages = await this.chatService['messageModel']
+        .find({ chatRoomId: roomId })
+        .select('messageText timestamp senderId isRead')
+        .sort({ timestamp: 1 })
+        .exec();
+
+      const totalCount = await this.chatService['messageModel'].countDocuments({
+        chatRoomId: roomId,
+      });
+
+      return {
+        success: true,
+        message: 'Debug messages retrieved',
+        data: {
+          roomId,
+          totalCount,
+          messages: messages.map((m) => ({
+            id: m._id,
+            text: m.messageText,
+            senderId: m.senderId,
+            timestamp: m.timestamp,
+            isRead: m.isRead,
+          })),
+          roomIdType: typeof roomId,
+          roomIdValid: require('mongoose').Types.ObjectId.isValid(roomId),
         },
       };
     } catch (error) {
