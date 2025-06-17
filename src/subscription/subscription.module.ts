@@ -11,17 +11,24 @@ import {
   SubscriptionPlan,
   SubscriptionPlanSchema,
 } from './entities/subscription-plan.entity';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Subscription.name, schema: SubscriptionSchema },
       { name: SubscriptionPlan.name, schema: SubscriptionPlanSchema },
-      { name: User.name, schema: UserSchema },
     ]),
+    UsersModule,
   ],
   controllers: [SubscriptionController],
   providers: [SubscriptionService],
-  exports: [SubscriptionService],
+  exports: [
+    SubscriptionService,
+    MongooseModule.forFeature([
+      { name: Subscription.name, schema: SubscriptionSchema },
+      { name: SubscriptionPlan.name, schema: SubscriptionPlanSchema },
+    ]),
+  ],
 })
 export class SubscriptionModule {}

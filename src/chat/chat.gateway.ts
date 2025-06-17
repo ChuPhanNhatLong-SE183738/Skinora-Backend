@@ -1,355 +1,645 @@
 import {
   WebSocketGateway,
+  WebSocketServer,
   SubscribeMessage,
-  MessageBody,
-  ConnectedSocket,
   OnGatewayConnection,
   OnGatewayDisconnect,
-  WebSocketServer,
-  OnGatewayInit,
+  MessageBody,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @WebSocketGateway({
   cors: {
     origin: '*',
     methods: ['GET', 'POST'],
-    credentials: true,
+    credentials: false, // Change to false for mobile
+    allowedHeaders: ['*'],
   },
   namespace: '/chat',
-  transports: ['websocket', 'polling'],
-  allowEIO3: true, // Add compatibility
+  transports: ['websocket', 'polling'], // Add both transports
 })
-export class ChatGateway
-  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
-{
+export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(ChatGateway.name);
-  private connectedUsers = new Map<string, string>(); // userId -> socketId
-  private connectionCount = 0; // Track manually
+  private connectedUsers = new Map<string, Set<string>>(); // userId -> Set of socketIds
+  private userSockets = new Map<string, Socket>(); // socketId -> socket
+  private socketUsers = new Map<string, string>(); // socketId -> userId
 
-  afterInit(server: Server) {
-    this.logger.log('🚀 Chat WebSocket Gateway initialized');
-    this.logger.log(`Server running on namespace: /chat`);
-
-    // Add error handling for server
-    server.on('error', (error) => {
-      this.logger.error(`Socket.IO server error: ${error.message}`);
-    });
-  }
-
-  handleConnection(client: Socket) {
-    try {
-      this.connectionCount++;
-
-      this.logger.log(`✅ Chat client connected: ${client.id}`);
-      this.logger.log(
-        `Client handshake query: ${JSON.stringify(client.handshake.query)}`,
-      );
-      this.logger.log(`Client address: ${client.handshake.address}`);
-      this.logger.log(`Connected clients count: ${this.connectionCount}`);
-
-      // Send welcome message
-      client.emit('connection_status', {
-        status: 'connected',
-        socketId: client.id,
-        timestamp: new Date().toISOString(),
-        connectedCount: this.connectionCount,
-      });
-
-      // Handle client errors
-      client.on('error', (error) => {
-        this.logger.error(`Client ${client.id} error: ${error.message}`);
-      });
-    } catch (error) {
-      this.logger.error(`Error in handleConnection: ${error.message}`);
-    }
-  }
-
-  handleDisconnect(client: Socket) {
-    try {
-      this.connectionCount = Math.max(0, this.connectionCount - 1);
-
-      this.logger.log(`❌ Chat client disconnected: ${client.id}`);
-
-      // Remove user from connected users
-      let disconnectedUserId = null;
-      for (const [userId, socketId] of this.connectedUsers.entries()) {
-        if (socketId === client.id) {
-          this.connectedUsers.delete(userId);
-          (disconnectedUserId as any) = userId;
-          break;
-        }
-      }
-
-      this.logger.log(`Disconnected user ID: ${disconnectedUserId}`);
-      this.logger.log(`Remaining connected users: ${this.connectedUsers.size}`);
-      this.logger.log(`Total connected clients: ${this.connectionCount}`);
-    } catch (error) {
-      this.logger.error(`Error in handleDisconnect: ${error.message}`);
-    }
-  }
-
-  @SubscribeMessage('join_chat')
-  handleJoinChat(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { userId: string; chatRoomId: string },
+  constructor(
+    private jwtService: JwtService,
+    private configService: ConfigService,
   ) {
-    try {
-      this.logger.log(`🔗 User joining chat - Data: ${JSON.stringify(data)}`);
+    // Start periodic cleanup when gateway initializes
+    this.startPeriodicCleanup();
+  }
 
-      if (!data.userId || !data.chatRoomId) {
-        this.logger.error('❌ Missing userId or chatRoomId in join_chat');
-        client.emit('error', {
-          message: 'Missing required fields: userId, chatRoomId',
+  async handleConnection(client: Socket) {
+    this.logger.log(`🔌 New connection attempt: ${client.id}`);
+    this.logger.log(`🔍 Handshake data:`, {
+      query: client.handshake.query,
+      auth: client.handshake.auth,
+      headers: Object.keys(client.handshake.headers),
+    });
+
+    try {
+      // Extract token from multiple sources
+      const token =
+        client.handshake.auth?.token ||
+        client.handshake.query?.token ||
+        client.handshake.headers?.authorization?.replace('Bearer ', '');
+
+      if (!token) {
+        this.logger.warn(`❌ Client ${client.id} connected without token`);
+        client.emit('connection_error', {
+          message: 'Authentication token required',
+          code: 'NO_TOKEN',
         });
         return;
       }
 
-      this.connectedUsers.set(data.userId, client.id);
-      client.join(data.chatRoomId);
-
       this.logger.log(
-        `✅ User ${data.userId} joined chat room ${data.chatRoomId}`,
-      );
-      this.logger.log(
-        `Current connected users: ${Array.from(this.connectedUsers.keys()).join(', ')}`,
+        `🔑 Token found for client ${client.id}: ${token.substring(0, 50)}...`,
       );
 
-      client.emit('joined_chat', {
-        success: true,
-        chatRoomId: data.chatRoomId,
-        userId: data.userId,
+      // Verify JWT token with explicit secret
+      const jwtSecret = this.configService.get<string>('JWT_SECRET');
+      if (!jwtSecret) {
+        this.logger.error(`❌ JWT_SECRET not found in config`);
+        client.emit('connection_error', {
+          message: 'Server configuration error',
+          code: 'CONFIG_ERROR',
+        });
+        return;
+      }
+
+      const payload = this.jwtService.verify(token, { secret: jwtSecret });
+      const userId = payload.sub || payload.id;
+
+      this.logger.log(`✅ Token verified successfully for user: ${userId}`);
+
+      if (!userId) {
+        this.logger.warn(`❌ Invalid token payload for client ${client.id}`);
+        client.emit('connection_error', {
+          message: 'Invalid token payload',
+          code: 'INVALID_TOKEN',
+        });
+        return;
+      }
+
+      // Store user connection with multiple device support
+      if (!this.connectedUsers.has(userId)) {
+        this.connectedUsers.set(userId, new Set());
+      }
+      this.connectedUsers.get(userId)!.add(client.id);
+      this.userSockets.set(client.id, client);
+      this.socketUsers.set(client.id, userId);
+
+      // Join user to their personal room
+      client.join(`user_${userId}`);
+
+      const deviceCount = this.connectedUsers.get(userId)!.size;
+      this.logger.log(
+        `✅ User ${userId} connected with socket ${client.id} (device ${deviceCount})`,
+      );
+
+      // Notify user is online with device info
+      client.emit('connected', {
+        message: 'Connected to chat successfully',
+        userId,
         socketId: client.id,
-        timestamp: new Date().toISOString(),
+        deviceCount,
+        totalConnectedUsers: this.connectedUsers.size,
+        timestamp: new Date(),
       });
 
-      // Notify room about new participant
-      client.to(data.chatRoomId).emit('user_joined_room', {
-        userId: data.userId,
-        socketId: client.id,
+      // Broadcast to other devices of same user
+      client.to(`user_${userId}`).emit('user_device_connected', {
+        userId,
+        newSocketId: client.id,
+        totalDevices: deviceCount,
+        timestamp: new Date(),
       });
     } catch (error) {
-      this.logger.error(`❌ Error in join_chat: ${error.message}`);
-      client.emit('error', {
-        message: 'Failed to join chat room',
-        error: error.message,
+      this.logger.error(`❌ Connection error for ${client.id}:`, {
+        message: error.message,
+        name: error.name,
+        stack: error.stack?.substring(0, 200),
+      });
+
+      client.emit('connection_error', {
+        message: 'Token verification failed',
+        code: 'TOKEN_ERROR',
+        details: error.message,
       });
     }
   }
 
-  @SubscribeMessage('leave_chat')
-  handleLeaveChat(
+  handleDisconnect(client: Socket) {
+    this.logger.log(`🔌 Client disconnecting: ${client.id}`);
+
+    const userId = this.socketUsers.get(client.id);
+    if (userId) {
+      const userSockets = this.connectedUsers.get(userId);
+      if (userSockets) {
+        userSockets.delete(client.id);
+
+        if (userSockets.size === 0) {
+          // No more devices for this user
+          this.connectedUsers.delete(userId);
+          this.logger.log(
+            `❌ User ${userId} completely disconnected (no devices left)`,
+          );
+        } else {
+          this.logger.log(
+            `❌ User ${userId} device disconnected (${userSockets.size} devices remaining)`,
+          );
+          // Notify other devices of same user
+          client.to(`user_${userId}`).emit('user_device_disconnected', {
+            userId,
+            disconnectedSocketId: client.id,
+            remainingDevices: userSockets.size,
+            timestamp: new Date(),
+          });
+        }
+      }
+      this.socketUsers.delete(client.id);
+    }
+
+    this.userSockets.delete(client.id);
+
+    // Clean up any stale connections
+    this.cleanupStaleConnections();
+  }
+
+  // Add periodic cleanup
+  private startPeriodicCleanup() {
+    setInterval(() => {
+      this.cleanupStaleConnections();
+    }, 30000); // Clean every 30 seconds
+  }
+
+  // Add cleanup method for stale connections
+  private cleanupStaleConnections() {
+    let cleanedCount = 0;
+
+    // Check if sockets in userSockets are still connected
+    for (const [socketId, socket] of this.userSockets.entries()) {
+      if (!socket.connected) {
+        this.userSockets.delete(socketId);
+
+        // Remove from user tracking
+        const userId = this.socketUsers.get(socketId);
+        if (userId) {
+          const userSockets = this.connectedUsers.get(userId);
+          if (userSockets) {
+            userSockets.delete(socketId);
+            if (userSockets.size === 0) {
+              this.connectedUsers.delete(userId);
+            }
+          }
+          this.socketUsers.delete(socketId);
+        }
+        cleanedCount++;
+      }
+    }
+
+    if (cleanedCount > 0) {
+      this.logger.log(`🧹 Cleaned up ${cleanedCount} stale connections`);
+    }
+  }
+
+  @SubscribeMessage('test_connection')
+  async handleTestConnection(@ConnectedSocket() client: Socket) {
+    this.logger.log(`🧪 Test connection from ${client.id}`);
+    client.emit('test_response', {
+      message: 'WebSocket connection is working',
+      timestamp: new Date(),
+      socketId: client.id,
+    });
+  }
+
+  @SubscribeMessage('join_room')
+  async handleJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatRoomId: string; userId?: string },
+    @MessageBody() data: { roomId: string; userId: string },
   ) {
     try {
-      this.logger.log(`👋 Client leaving chat room: ${JSON.stringify(data)}`);
+      const { roomId, userId } = data;
 
-      client.leave(data.chatRoomId);
+      // Validate data
+      if (!roomId || !userId) {
+        client.emit('error', { message: 'roomId and userId are required' });
+        return;
+      }
 
-      // Notify room about participant leaving
-      client.to(data.chatRoomId).emit('user_left_room', {
-        userId: data.userId,
+      // Join room FIRST
+      client.join(`room_${roomId}`);
+
+      // THEN get room member count (after joining)
+      let roomMemberCount = 0;
+      try {
+        const room = this.server?.sockets?.adapter?.rooms?.get(
+          `room_${roomId}`,
+        );
+        roomMemberCount = room ? room.size : 0;
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ Could not get room member count: ${error.message}`,
+        );
+        roomMemberCount = 1; // Fallback value
+      }
+
+      const userDeviceCount = this.connectedUsers.get(userId)?.size || 0;
+
+      this.logger.log(
+        `👥 User ${userId} (device ${client.id}) joined room ${roomId} - Room NOW has ${roomMemberCount} total connections`,
+      );
+
+      // Notify user joined room
+      client.emit('room_joined', {
+        roomId,
+        message: 'Successfully joined chat room',
+        roomMemberCount,
+        userDeviceCount,
         socketId: client.id,
+        timestamp: new Date(),
+      });
+
+      // Notify others in room (after join, so they get updated count too)
+      client.to(`room_${roomId}`).emit('user_joined', {
+        userId,
+        roomId,
+        socketId: client.id,
+        roomMemberCount,
+        newUserName: `User ${userId}`,
+        timestamp: new Date(),
+      });
+
+      // Send updated room info to all members
+      setTimeout(() => {
+        this.broadcastRoomUpdate(roomId);
+      }, 100);
+    } catch (error) {
+      this.logger.error(`❌ Error joining room:`, error);
+      client.emit('error', {
+        message: 'Failed to join room',
+        details: error.message,
+      });
+    }
+  }
+
+  // Add method to broadcast room updates
+  private async broadcastRoomUpdate(roomId: string) {
+    try {
+      const room = this.server?.sockets?.adapter?.rooms?.get(`room_${roomId}`);
+      const memberCount = room ? room.size : 0;
+      const socketIds = room ? Array.from(room) : [];
+
+      // Get unique users in room
+      const uniqueUsers = new Set<string>();
+      socketIds.forEach((socketId) => {
+        const userId = this.socketUsers.get(socketId);
+        if (userId) uniqueUsers.add(userId);
       });
 
       this.logger.log(
-        `✅ Client ${client.id} left chat room ${data.chatRoomId}`,
+        `📊 Broadcasting room update - Room ${roomId}: ${memberCount} connections, ${uniqueUsers.size} unique users`,
       );
+
+      // Broadcast to all room members
+      this.server.to(`room_${roomId}`).emit('room_update', {
+        roomId,
+        totalConnections: memberCount,
+        uniqueUsers: uniqueUsers.size,
+        userList: Array.from(uniqueUsers),
+        timestamp: new Date(),
+      });
     } catch (error) {
-      this.logger.error(`❌ Error in leave_chat: ${error.message}`);
+      this.logger.error(`❌ Error broadcasting room update:`, error);
+    }
+  }
+
+  @SubscribeMessage('leave_room')
+  async handleLeaveRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; userId: string },
+  ) {
+    try {
+      const { roomId, userId } = data;
+
+      // Leave room
+      client.leave(`room_${roomId}`);
+
+      this.logger.log(`👋 User ${userId} left room ${roomId}`);
+
+      // Notify others in room
+      client.to(`room_${roomId}`).emit('user_left', {
+        userId,
+        roomId,
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      this.logger.error(`❌ Error leaving room:`, error);
     }
   }
 
   @SubscribeMessage('typing_start')
-  handleTypingStart(
+  async handleTypingStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: { chatRoomId: string; userId: string; userName: string },
+    @MessageBody() data: { roomId: string; userId: string; userName: string },
   ) {
-    try {
-      this.logger.debug(
-        `⌨️ User ${data.userId} started typing in room ${data.chatRoomId}`,
-      );
+    const { roomId, userId, userName } = data;
 
-      client.to(data.chatRoomId).emit('user_typing', {
-        userId: data.userId,
-        userName: data.userName,
-        isTyping: true,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      this.logger.error(`❌ Error in typing_start: ${error.message}`);
-    }
+    // Notify others in room that user is typing
+    client.to(`room_${roomId}`).emit('user_typing', {
+      userId,
+      userName,
+      roomId,
+      isTyping: true,
+      timestamp: new Date(),
+    });
   }
 
   @SubscribeMessage('typing_stop')
-  handleTypingStop(
+  async handleTypingStop(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatRoomId: string; userId: string },
+    @MessageBody() data: { roomId: string; userId: string },
   ) {
-    try {
-      this.logger.debug(
-        `⌨️ User ${data.userId} stopped typing in room ${data.chatRoomId}`,
-      );
+    const { roomId, userId } = data;
 
-      client.to(data.chatRoomId).emit('user_typing', {
-        userId: data.userId,
-        isTyping: false,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      this.logger.error(`❌ Error in typing_stop: ${error.message}`);
-    }
+    // Notify others in room that user stopped typing
+    client.to(`room_${roomId}`).emit('user_typing', {
+      userId,
+      roomId,
+      isTyping: false,
+      timestamp: new Date(),
+    });
   }
 
   @SubscribeMessage('ping')
-  handlePing(@ConnectedSocket() client: Socket) {
-    this.logger.debug(`🏓 Ping received from ${client.id}`);
-    client.emit('pong', { timestamp: new Date().toISOString() });
+  async handlePing(@ConnectedSocket() client: Socket) {
+    client.emit('pong', { timestamp: new Date() });
   }
 
-  @SubscribeMessage('send_message')
-  handleSendMessage(
-    @ConnectedSocket() client: Socket,
-    @MessageBody()
-    data: {
-      chatRoomId: string;
-      content: string;
-      messageType?: string;
-      userId: string;
-    },
-  ) {
+  // Method to broadcast new message to room
+  async broadcastMessage(roomId: string, message: any) {
     try {
+      this.logger.log(`📡 Broadcasting message to room ${roomId}`);
+
+      // Safely get room members with null checking
+      let memberCount = 0;
+      let room: Set<string> | undefined;
+
+      try {
+        room = this.server?.sockets?.adapter?.rooms?.get(`room_${roomId}`);
+        memberCount = room ? room.size : 0;
+      } catch (error) {
+        this.logger.warn(`⚠️ Could not get room info: ${error.message}`);
+      }
+
+      this.logger.log(`🏠 Room room_${roomId} has ${memberCount} members`);
+
+      if (memberCount === 0) {
+        this.logger.warn(
+          `⚠️ No members in room room_${roomId} to broadcast to`,
+        );
+      }
+
+      // Broadcast to room
+      this.server.to(`room_${roomId}`).emit('new_message', {
+        message,
+        roomId,
+        timestamp: new Date(),
+        type: 'new_message',
+      });
+
       this.logger.log(
-        `📨 Direct message via WebSocket: ${JSON.stringify(data)}`,
+        `📨 Message broadcasted to ${memberCount} members in room_${roomId}`,
       );
 
-      // Broadcast message to room immediately
-      client.to(data.chatRoomId).emit('new_message_broadcast', {
-        ...data,
-        socketId: client.id,
-        timestamp: new Date().toISOString(),
-      });
+      // Also broadcast to individual users for backup
+      if (message.senderId && room) {
+        const senderId =
+          typeof message.senderId === 'object'
+            ? message.senderId._id
+            : message.senderId;
 
-      client.emit('message_acknowledged', {
-        success: true,
-        chatRoomId: data.chatRoomId,
-        timestamp: new Date().toISOString(),
-      });
+        // Find other participants in the room and send direct messages
+        const socketIds = Array.from(room || []);
+        socketIds.forEach((socketId) => {
+          const socket = this.userSockets.get(socketId);
+          if (socket) {
+            this.logger.log(`📤 Sending backup message to socket ${socketId}`);
+            socket.emit('message_received', {
+              message,
+              roomId,
+              timestamp: new Date(),
+              type: 'backup_delivery',
+            });
+          }
+        });
+      }
     } catch (error) {
-      this.logger.error(`❌ Error in send_message: ${error.message}`);
-      client.emit('error', { message: error.message });
+      this.logger.error(`❌ Error broadcasting message:`, error);
     }
   }
 
   @SubscribeMessage('get_room_members')
-  handleGetRoomMembers(
+  async handleGetRoomMembers(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { chatRoomId: string },
+    @MessageBody() data: { roomId: string },
   ) {
     try {
-      const room = this.server.sockets.adapter.rooms.get(data.chatRoomId);
-      const memberCount = room ? room.size : 0;
+      const { roomId } = data;
 
-      this.logger.log(`Room ${data.chatRoomId} has ${memberCount} members`);
+      // Safely get room info with null checking
+      let memberCount = 0;
+      let socketIds: string[] = [];
+      let room: Set<string> | undefined;
 
-      client.emit('room_members', {
-        chatRoomId: data.chatRoomId,
-        memberCount,
-        members: room ? Array.from(room) : [],
+      try {
+        room = this.server?.sockets?.adapter?.rooms?.get(`room_${roomId}`);
+        memberCount = room ? room.size : 0;
+        socketIds = room ? Array.from(room) : [];
+      } catch (error) {
+        this.logger.warn(`⚠️ Could not get room members: ${error.message}`);
+      }
+
+      // Get unique users in room
+      const uniqueUsers = new Set<string>();
+      socketIds.forEach((socketId) => {
+        const userId = this.socketUsers.get(socketId);
+        if (userId) uniqueUsers.add(userId);
+      });
+
+      this.logger.log(
+        `🔍 Room ${roomId} has ${memberCount} total connections from ${uniqueUsers.size} unique users`,
+      );
+
+      client.emit('room_members_info', {
+        roomId,
+        totalConnections: memberCount,
+        uniqueUsers: uniqueUsers.size,
+        socketIds,
+        userList: Array.from(uniqueUsers),
+        timestamp: new Date(),
+        serverInfo: {
+          hasAdapter: !!this.server?.sockets?.adapter,
+          hasRooms: !!this.server?.sockets?.adapter?.rooms,
+        },
       });
     } catch (error) {
-      this.logger.error(`❌ Error getting room members: ${error.message}`);
+      this.logger.error(`❌ Error getting room members:`, error);
+      client.emit('error', {
+        message: 'Failed to get room members',
+        details: error.message,
+      });
     }
   }
 
-  // Send message to specific user with retry
-  sendMessageToUser(userId: string, event: string, data: any) {
+  // Method to send message to specific room
+  sendToRoom(roomId: string, event: string, data: any): void {
     try {
-      const socketId = this.connectedUsers.get(userId);
-      this.logger.log(
-        `📤 Sending '${event}' to user ${userId} (socket: ${socketId})`,
+      this.server.to(`room_${roomId}`).emit(event, data);
+      this.logger.log(`📨 Sent ${event} to room ${roomId}`);
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to send to room ${roomId}: ${error.message}`,
       );
-      this.logger.log(`📤 Data:`, data);
+    }
+  }
 
-      if (socketId && this.server) {
-        this.server.to(socketId).emit(event, {
-          ...data,
-          timestamp: new Date().toISOString(),
-        });
-        this.logger.log(`✅ Message sent successfully to user ${userId}`);
-      } else {
-        this.logger.warn(
-          `⚠️ User ${userId} not connected or server unavailable`,
-        );
+  // Method to send message to specific user (all devices) with better error handling
+  async sendToUser(userId: string, event: string, data: any) {
+    try {
+      const userSockets = this.connectedUsers.get(userId);
 
-        // Try to find user in any room and send there
-        if (data.chatRoomId) {
-          this.logger.log(`🔄 Trying to send via room ${data.chatRoomId}`);
-          this.sendMessageToRoom(data.chatRoomId, event, data);
+      if (userSockets && userSockets.size > 0) {
+        let sentCount = 0;
+        let errorCount = 0;
+
+        // Convert Set to Array to safely iterate
+        const socketIds = Array.from(userSockets);
+
+        for (const socketId of socketIds) {
+          const socket = this.userSockets.get(socketId);
+          if (socket && socket.connected) {
+            try {
+              socket.emit(event, data);
+              sentCount++;
+            } catch (error) {
+              this.logger.warn(
+                `⚠️ Failed to send to socket ${socketId}: ${error.message}`,
+              );
+              errorCount++;
+
+              // Remove problematic socket
+              this.userSockets.delete(socketId);
+              userSockets.delete(socketId);
+              this.socketUsers.delete(socketId);
+            }
+          } else {
+            // Remove disconnected socket
+            this.userSockets.delete(socketId);
+            userSockets.delete(socketId);
+            this.socketUsers.delete(socketId);
+            errorCount++;
+          }
         }
-      }
-    } catch (error) {
-      this.logger.error(
-        `❌ Error sending message to user ${userId}: ${error.message}`,
-      );
-    }
-  }
 
-  // Send message to chat room with better logging
-  sendMessageToRoom(chatRoomId: string, event: string, data: any) {
-    try {
-      this.logger.log(`📤 Sending '${event}' to room ${chatRoomId}`);
-      this.logger.log(`📤 Room data:`, data);
+        // Clean up empty user entry
+        if (userSockets.size === 0) {
+          this.connectedUsers.delete(userId);
+        }
 
-      if (this.server) {
-        // Check room exists and has members
-        const room = this.server.sockets.adapter.rooms.get(chatRoomId);
-        const memberCount = room ? room.size : 0;
-
-        this.logger.log(`Room ${chatRoomId} has ${memberCount} members`);
-
-        this.server.to(chatRoomId).emit(event, {
-          ...data,
-          timestamp: new Date().toISOString(),
-          roomMemberCount: memberCount,
-        });
-
-        this.logger.log(`✅ Message sent successfully to room ${chatRoomId}`);
-      } else {
-        this.logger.error(
-          `❌ Server unavailable - cannot send message to room`,
+        this.logger.log(
+          `📤 Sent ${event} to user ${userId}: ${sentCount} successful, ${errorCount} failed/cleaned`,
         );
+      } else {
+        this.logger.warn(`⚠️ User ${userId} not connected for event ${event}`);
       }
     } catch (error) {
-      this.logger.error(
-        `❌ Error sending message to room ${chatRoomId}: ${error.message}`,
-      );
+      this.logger.error(`❌ Error sending to user ${userId}:`, error);
     }
   }
 
-  // Get connected users count
+  // Add debug method to check connection integrity
+  @SubscribeMessage('debug_connections')
+  async handleDebugConnections(@ConnectedSocket() client: Socket) {
+    const userId = this.socketUsers.get(client.id);
+    const userSocketsCount = userId
+      ? this.connectedUsers.get(userId)?.size || 0
+      : 0;
+    const totalUsers = this.connectedUsers.size;
+    const totalConnections = this.getTotalConnectionsCount();
+
+    client.emit('debug_connections_response', {
+      userId: userId || 'unknown',
+      socketId: client.id,
+      userSocketsCount,
+      totalUsers,
+      totalConnections,
+      timestamp: new Date(),
+    });
+
+    this.logger.log(
+      `🔍 Debug connections for user ${userId || 'unknown'}: ${userSocketsCount} sockets`,
+    );
+  }
+
+  // Get connected users count (unique users)
   getConnectedUsersCount(): number {
     return this.connectedUsers.size;
   }
 
-  // Get total connections count (manual tracking)
+  // Get total connections count
   getTotalConnectionsCount(): number {
-    return this.connectionCount;
+    let total = 0;
+    this.connectedUsers.forEach((sockets) => {
+      total += sockets.size;
+    });
+    return total;
   }
 
-  // Get all connected users
+  // Get connected users list
   getConnectedUsers(): string[] {
     return Array.from(this.connectedUsers.keys());
   }
 
-  // Health check method
-  isServerReady(): boolean {
-    return !!this.server;
+  // Get detailed connection info
+  getConnectionDetails() {
+    const details: any = {};
+    this.connectedUsers.forEach((sockets, userId) => {
+      details[userId] = {
+        deviceCount: sockets.size,
+        socketIds: Array.from(sockets),
+      };
+    });
+    return details;
+  }
+
+  // Check if user is online
+  isUserOnline(userId: string): boolean {
+    return (
+      this.connectedUsers.has(userId) &&
+      this.connectedUsers.get(userId)!.size > 0
+    );
+  }
+
+  // Get room members count
+  async getRoomMembersCount(roomId: string): Promise<number> {
+    try {
+      const room = this.server?.sockets?.adapter?.rooms?.get(`room_${roomId}`);
+      return room ? room.size : 0;
+    } catch (error) {
+      this.logger.warn(`⚠️ Could not get room member count: ${error.message}`);
+      return 0;
+    }
   }
 }

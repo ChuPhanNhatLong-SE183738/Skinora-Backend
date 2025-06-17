@@ -21,6 +21,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
   ],
   controllers: [DoctorsController],
   providers: [DoctorsService],
-  exports: [DoctorsService],
+  exports: [
+    DoctorsService,
+    MongooseModule.forFeature([{ name: Doctor.name, schema: DoctorSchema }]), // Export DoctorModel
+  ],
 })
 export class DoctorsModule {}

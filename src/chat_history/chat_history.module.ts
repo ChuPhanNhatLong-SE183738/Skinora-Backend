@@ -3,13 +3,13 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ChatHistory, ChatHistorySchema } from './entities/chat_history.entity';
 import { ChatHistoryService } from './chat_history.service';
 import { ChatHistoryController } from './chat_history.controller';
-import { ChatMessage, ChatMessageSchema } from '../chat_messages/entities/chat_message.entity';
+import { ChatMessages, ChatMessageSchema } from '../chat_messages/entities/chat_message.entity';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: ChatHistory.name, schema: ChatHistorySchema },
-      { name: ChatMessage.name, schema: ChatMessageSchema },
+      { name: ChatMessages.name, schema: ChatMessageSchema },
     ]),
   ],
   controllers: [ChatHistoryController],

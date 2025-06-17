@@ -39,23 +39,32 @@ export class AppointmentsService {
    */
   async verifyUserSubscription(userId: string): Promise<string> {
     this.logger.log(`Verifying subscription for user: ${userId}`);
-    
+
     // Get current subscription
-    const subscription = await this.subscriptionService.getCurrentSubscription(userId);
-    
+    const subscription =
+      await this.subscriptionService.getCurrentSubscription(userId);
+
     // Check if subscription exists and is active
     if (!subscription) {
       this.logger.warn(`No active subscription found for user ${userId}`);
-      throw new BadRequestException('You need an active subscription to book appointments with doctors');
+      throw new BadRequestException(
+        'You need an active subscription to book appointments with doctors',
+      );
     }
-    
+
     // Check if user has meetings left in their subscription
     if (subscription.meetingsUsed >= subscription.meetingAmount) {
-      this.logger.warn(`User ${userId} has used all meetings in subscription (${subscription.meetingsUsed}/${subscription.meetingAmount})`);
-      throw new BadRequestException(`You have used all meetings in your current subscription (${subscription.meetingsUsed}/${subscription.meetingAmount}). Please upgrade your plan.`);
+      this.logger.warn(
+        `User ${userId} has used all meetings in subscription (${subscription.meetingsUsed}/${subscription.meetingAmount})`,
+      );
+      throw new BadRequestException(
+        `You have used all meetings in your current subscription (${subscription.meetingsUsed}/${subscription.meetingAmount}). Please upgrade your plan.`,
+      );
     }
-    
-    this.logger.log(`User ${userId} has a valid subscription with ${subscription.meetingAmount - subscription.meetingsUsed} meetings left`);
+
+    this.logger.log(
+      `User ${userId} has a valid subscription with ${subscription.meetingAmount - subscription.meetingsUsed} meetings left`,
+    );
     return (subscription as any)._id.toString(); // Return the subscription ID for later use
   }
 
@@ -64,26 +73,34 @@ export class AppointmentsService {
    */
   private verifyAppointmentTime(date: string, timeSlot: string): void {
     this.logger.log(`Verifying appointment time: ${date} ${timeSlot}`);
-    
-    const [hours, minutes] = timeSlot.split(':').map((num) => parseInt(num, 10));
+
+    const [hours, minutes] = timeSlot
+      .split(':')
+      .map((num) => parseInt(num, 10));
     const appointmentDateTime = new Date(date);
     appointmentDateTime.setHours(hours, minutes, 0, 0);
-    
+
     const now = new Date();
-    
+
     // Add a small buffer (e.g., 5 minutes) to prevent issues when appointment time is very close to current time
     const bufferMinutes = 5;
     const minimumValidTime = new Date();
     minimumValidTime.setMinutes(now.getMinutes() + bufferMinutes);
-    
+
     if (appointmentDateTime < minimumValidTime) {
       const formattedApptTime = appointmentDateTime.toLocaleString();
       const formattedNow = now.toLocaleString();
-      this.logger.warn(`Appointment time ${formattedApptTime} is in the past (current time: ${formattedNow})`);
-      throw new BadRequestException(`Cannot book appointments in the past or less than ${bufferMinutes} minutes from now. Selected time: ${formattedApptTime}, Current time: ${formattedNow}`);
+      this.logger.warn(
+        `Appointment time ${formattedApptTime} is in the past (current time: ${formattedNow})`,
+      );
+      throw new BadRequestException(
+        `Cannot book appointments in the past or less than ${bufferMinutes} minutes from now. Selected time: ${formattedApptTime}, Current time: ${formattedNow}`,
+      );
     }
-    
-    this.logger.log(`Appointment time validation passed for ${date} ${timeSlot}`);
+
+    this.logger.log(
+      `Appointment time validation passed for ${date} ${timeSlot}`,
+    );
   }
 
   async create(createAppointmentDto: CreateAppointmentDto) {
@@ -166,7 +183,7 @@ export class AppointmentsService {
         await this.chatService.createChatRoom({
           patientId: createAppointmentDto.userId,
           doctorId: createAppointmentDto.doctorId,
-          appointmentId: savedAppointment.id.toString(),
+          appointmentId: (savedAppointment._id as any).toString(),
         });
         this.logger.log(
           `Chat room created for appointment ${savedAppointment._id}`,
@@ -179,7 +196,9 @@ export class AppointmentsService {
       // Record meeting usage in subscription
       try {
         await this.subscriptionService.useMeeting(subscriptionId);
-        this.logger.log(`Meeting usage recorded in subscription: ${subscriptionId}`);
+        this.logger.log(
+          `Meeting usage recorded in subscription: ${subscriptionId}`,
+        );
       } catch (error) {
         this.logger.error(`Failed to record meeting usage: ${error.message}`);
         // Don't fail appointment creation if updating subscription fails
@@ -271,17 +290,16 @@ export class AppointmentsService {
   /**
    * Updates appointment status and handles related subscription meeting tracking
    */
-  async updateAppointmentStatus(id: string, status: 'scheduled' | 'completed' | 'cancelled') {
+  async updateAppointmentStatus(
+    id: string,
+    status: 'scheduled' | 'completed' | 'cancelled',
+  ) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid appointment ID format');
     }
 
     const appointment = await this.appointmentModel
-      .findByIdAndUpdate(
-        id, 
-        { appointmentStatus: status }, 
-        { new: true }
-      )
+      .findByIdAndUpdate(id, { appointmentStatus: status }, { new: true })
       .exec();
 
     if (!appointment) {
@@ -381,25 +399,31 @@ export class AppointmentsService {
         availableTimeSlots.splice(index, 1);
       }
     });
-    
+
     // Filter out time slots in the past
     const now = new Date();
-    const isToday = dateObj.setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
-    
+    const isToday =
+      dateObj.setHours(0, 0, 0, 0) === new Date().setHours(0, 0, 0, 0);
+
     if (isToday) {
       // Add a small buffer (e.g., 30 minutes) for upcoming appointments
       const bufferMinutes = 30;
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes() + bufferMinutes;
-      
-      const filteredTimeSlots = availableTimeSlots.filter(timeSlot => {
-        const [slotHour, slotMinute] = timeSlot.split(':').map(num => parseInt(num, 10));
-        if (slotHour > currentHour || (slotHour === currentHour && slotMinute > currentMinute)) {
+
+      const filteredTimeSlots = availableTimeSlots.filter((timeSlot) => {
+        const [slotHour, slotMinute] = timeSlot
+          .split(':')
+          .map((num) => parseInt(num, 10));
+        if (
+          slotHour > currentHour ||
+          (slotHour === currentHour && slotMinute > currentMinute)
+        ) {
           return true;
         }
         return false;
       });
-      
+
       return {
         available: filteredTimeSlots.length > 0,
         timeSlots: filteredTimeSlots,
@@ -540,13 +564,10 @@ export class AppointmentsService {
       this.logger.error(
         `Invalid user ID format - patientId: ${patientId}, doctorId: ${doctorId}`,
       );
-      this.logger.error(
-        `Patient ID valid: ${Types.ObjectId.isValid(patientId)}, Doctor ID valid: ${Types.ObjectId.isValid(doctorId)}`,
-      );
       throw new BadRequestException('Invalid user ID format in appointment');
     }
 
-    // Determine user role for response (fallback to patient if not found)
+    // Determine user role
     const isPatient = patientId === userId;
     const isDoctor = doctorId === userId;
     const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'patient';
@@ -556,13 +577,15 @@ export class AppointmentsService {
     );
 
     try {
-      // Initiate call using CallService
+      // Always use actual patientId and doctorId from appointment
+      // Pass a flag to indicate if doctor initiated the call
       this.logger.log(`Initiating call with CallService...`);
-      const callResult = await this.callService.initiateCall(
+      const callResult = await this.callService.initiateCallWithRole(
         patientId,
         doctorId,
         callType,
         appointmentId,
+        isDoctor, // Pass flag to indicate if doctor initiated
       );
 
       this.logger.log(`Call initiated successfully:`, callResult);
@@ -584,7 +607,7 @@ export class AppointmentsService {
         },
         userRole,
         initiatedBy: userId,
-        message: `Video call initiated for appointment - Testing Mode`,
+        message: `Video call initiated for appointment - ${isDoctor ? 'Doctor Mode' : 'Patient Mode'}`,
       };
     } catch (error) {
       this.logger.error(`Error in startVideoCallFromAppointment:`, error);
@@ -606,31 +629,58 @@ export class AppointmentsService {
       throw new NotFoundException('Appointment not found');
     }
 
-    if (!appointment.callId) {
-      throw new BadRequestException('No active call for this appointment');
+    // Find call by appointmentId in calls table
+    const activeCall =
+      await this.callService.getCallByAppointmentId(appointmentId);
+
+    if (!activeCall) {
+      throw new BadRequestException(
+        'No active call found for this appointment',
+      );
     }
 
-    // TODO: Add back authorization check later
-    // For testing: allow anyone to join
+    // Allow joining if call is pending, active, or connected
+    const allowedStatuses = ['pending', 'active', 'connected'];
+    if (!allowedStatuses.includes(activeCall.status)) {
+      throw new BadRequestException(
+        `Cannot join call with status: ${activeCall.status}`,
+      );
+    }
+
+    // Check authorization
     const isPatient = appointment.userId.toString() === userId;
     const isDoctor = appointment.doctorId.toString() === userId;
 
-    const userRole = isPatient ? 'patient' : isDoctor ? 'doctor' : 'tester';
+    if (!isPatient && !isDoctor) {
+      throw new BadRequestException('You are not authorized to join this call');
+    }
+
+    const userRole = isPatient ? 'patient' : 'doctor';
 
     // Get call details
-    const call = await this.callService.getCallById(appointment.callId.toString());
+    const call = await this.callService.getCallById(
+      appointment.callId.toString(),
+    );
 
     if (!call) {
       throw new NotFoundException('Call not found');
     }
 
-    if (call.status === 'ended') {
-      throw new BadRequestException('Call has already ended');
+    // Update call status to active when someone joins
+    if (call.status === 'pending') {
+      await this.callService.updateCallStatus(
+        (call as any)._id.toString(),
+        'active',
+      );
     }
 
     // Generate new token for joining user
     const uid = Math.floor(Math.random() * 100000) + 1;
     const token = this.agoraService.generateRtcToken(call.roomId, uid);
+
+    this.logger.log(
+      `📞 User ${userId} (${userRole}) joining call ${(call as any)._id}`,
+    );
 
     return {
       appointment: {
@@ -639,15 +689,103 @@ export class AppointmentsService {
         endTime: appointment.endTime,
         status: appointment.appointmentStatus,
       },
+      // Agora configuration
       agoraAppId: this.agoraService.getAppId(),
-      otherParticipant: isPatient ? call.doctorId : call.patientId,
-      callStatus: call.status,
-      userRole,
-      uid,
-      token,
+      appId: this.agoraService.getAppId(), // Backup field name
       channelName: call.roomId,
-      callId: call._id,
-      message: 'Ready to join video call - Testing Mode',
+      token: token,
+      patientToken: token, // For compatibility
+      doctorToken: token, // For compatibility
+      uid: uid,
+
+      // Call details
+      callId: (call as any)._id,
+      callStatus: 'active', // Return active status
+      roomId: call.roomId,
+      userRole,
+      otherParticipant: isPatient ? call.doctorId : call.patientId,
+
+      // Status
+      canJoin: true,
+      message: `Ready to join video call as ${userRole}`,
+
+      // Debug info
+      debug: {
+        hasAgoraAppId: !!this.agoraService.getAppId(),
+        hasToken: !!token,
+        hasChannelName: !!call.roomId,
+        generatedUid: uid,
+        originalCallStatus: call.status,
+      },
     };
+  }
+
+  async endVideoCall(appointmentId: string, userId: string) {
+    this.logger.log(
+      `Ending video call - appointmentId: ${appointmentId}, userId: ${userId}`,
+    );
+
+    // Validate appointmentId format
+    if (!Types.ObjectId.isValid(appointmentId)) {
+      throw new BadRequestException('Invalid appointment ID format');
+    }
+
+    const appointment = await this.appointmentModel
+      .findById(appointmentId)
+      .exec();
+
+    if (!appointment) {
+      throw new NotFoundException('Appointment not found');
+    }
+
+    if (!appointment.callId) {
+      throw new BadRequestException(
+        'No active call found for this appointment',
+      );
+    }
+
+    // Verify user has permission to end the call
+    const isPatient = appointment.userId.toString() === userId;
+    const isDoctor = appointment.doctorId.toString() === userId;
+
+    if (!isPatient && !isDoctor) {
+      throw new BadRequestException('You are not authorized to end this call');
+    }
+
+    try {
+      // End the call using CallService
+      const callResult = await this.callService.endCall(
+        appointment.callId.toString(),
+        userId,
+      );
+
+      if (!callResult) {
+        throw new BadRequestException('Failed to end call');
+      }
+
+      this.logger.log(`Call ended successfully:`, callResult);
+
+      // Update appointment status to completed
+      await this.appointmentModel.findByIdAndUpdate(appointmentId, {
+        appointmentStatus: 'completed',
+      });
+
+      return {
+        callId: (callResult as any)._id,
+        duration: callResult.duration,
+        endTime: callResult.endTime,
+        status: callResult.status,
+        appointment: {
+          id: appointment._id,
+          status: 'completed',
+        },
+        endedBy: userId,
+        userRole: isPatient ? 'patient' : 'doctor',
+        message: 'Call ended successfully',
+      };
+    } catch (error) {
+      this.logger.error(`Error ending call:`, error);
+      throw error;
+    }
   }
 }
