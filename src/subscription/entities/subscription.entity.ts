@@ -5,6 +5,7 @@ export type SubscriptionDocument = Subscription & Document;
 
 @Schema({ timestamps: true })
 export class Subscription {
+  [x: string]: any;
   @Prop({ type: Types.ObjectId, ref: 'SubscriptionPlan', required: true })
   planId: Types.ObjectId;
 

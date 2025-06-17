@@ -9,6 +9,7 @@ import {
   RecommendedProductsSchema,
 } from './entities/recommended-products.entity';
 import { ProductsModule } from '../products/products.module';
+import { SubscriptionModule } from '../subscription/subscription.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { ProductsModule } from '../products/products.module';
       dest: './uploads/skin-analysis',
     }),
     forwardRef(() => ProductsModule),
+    forwardRef(() => SubscriptionModule),
   ],
   controllers: [AnalysisController],
   providers: [AnalysisService],

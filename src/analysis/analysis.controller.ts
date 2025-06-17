@@ -21,6 +21,7 @@ import { Role } from '../users/enums/role.enum';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
 import { AnalysisService } from './analysis.service';
+import { Types } from 'mongoose';
 import { CreateAnalyseDto } from './dto/create-analyse.dto';
 import { UpdateAnalyseDto } from './dto/update-analyse.dto';
 import { successResponse, errorResponse } from '../helper/response.helper';
@@ -173,6 +174,14 @@ export class AnalysisController {
       );
 
       const userId = req.user.userId || req.user._id || req.user.sub;
+      
+      // First check eligibility without consuming a usage token
+      const eligibility = await this.AnalysisService.validateUserAnalysisEligibility(userId);
+      
+      if (!eligibility.canAnalyze) {
+        return errorResponse(eligibility.message, HttpStatus.FORBIDDEN);
+      }
+      
       const imageUrl = `${req.protocol}://${req.get('host')}/uploads/skin-analysis/${file.filename}`;
 
       // Read file buffer for analysis
@@ -195,12 +204,56 @@ export class AnalysisController {
 
       this.logger.log(`Analysis completed successfully for user: ${userId}`);
 
-      return successResponse(result, 'Skin analysis completed successfully');
+      // Include eligibility message in the success response, if any
+      return successResponse(
+        result, 
+        eligibility.message ? 
+          `Skin analysis completed successfully. ${eligibility.message}` : 
+          'Skin analysis completed successfully'
+      );
     } catch (error) {
       this.logger.error(
         `Error during skin analysis: ${error.message}`,
         error.stack,
       );
+      return errorResponse(error.message, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // Add a new endpoint to check analysis eligibility without performing an analysis
+  @Get('check-eligibility')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Check user's skin analysis eligibility",
+    description:
+      'Check if the current user can perform a skin analysis based on their subscription status or free weekly usage.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Eligibility check completed',
+  })
+  async checkEligibility(@Req() req) {
+    try {
+      const userId = req.user.userId || req.user._id || req.user.sub;
+      const eligibility = await this.AnalysisService.validateUserAnalysisEligibility(userId);
+      
+      // For non-subscribed users, calculate remaining free analyses
+      if (!eligibility.subscriptionId && eligibility.canAnalyze) {
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        
+        const weeklyAnalysisCount = await this.AnalysisService.getUserWeeklyAnalysisCount(userId, oneWeekAgo);
+        
+        return successResponse({
+          ...eligibility,
+          remainingFreeAnalyses: 3 - weeklyAnalysisCount
+        }, 'Eligibility check completed');
+      }
+      
+      return successResponse(eligibility, 'Eligibility check completed');
+    } catch (error) {
+      this.logger.error(`Error checking eligibility: ${error.message}`);
       return errorResponse(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
