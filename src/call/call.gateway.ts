@@ -1,37 +1,86 @@
 import {
   WebSocketGateway,
+  WebSocketServer,
   SubscribeMessage,
   MessageBody,
   ConnectedSocket,
-  WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { Logger, Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 
+@Injectable()
 @WebSocketGateway({
+  namespace: '/call', // Đảm bảo có dấu /
   cors: {
-    origin: '*',
+    origin: true,
+    methods: ['GET', 'POST'],
+    credentials: false,
   },
+  transports: ['websocket', 'polling'],
 })
 export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  private readonly logger = new Logger(CallGateway.name);
+
   private connectedUsers = new Map<string, string>(); // userId -> socketId
 
-  handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
-  }
+  constructor(private jwtService: JwtService) {}
 
-  handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}`);
-    // Remove user from connected users
-    for (const [userId, socketId] of this.connectedUsers.entries()) {
-      if (socketId === client.id) {
-        this.connectedUsers.delete(userId);
-        break;
+  async handleConnection(client: Socket) {
+    try {
+      const token =
+        client.handshake.query.token ||
+        client.handshake.auth.token ||
+        client.handshake.headers.authorization?.replace('Bearer ', '');
+
+      if (!token) {
+        this.logger.warn('No token provided in Call WebSocket connection');
+        client.disconnect();
+        return;
       }
+
+      const payload = this.jwtService.verify(token as string);
+      const userId = payload.sub || payload.id;
+      const userType =
+        client.handshake.query.userType || payload.role || 'user';
+
+      client.data.userId = userId;
+      client.data.userRole = payload.role;
+      client.data.userType = userType;
+
+      // Store connection
+      this.connectedUsers.set(userId, client.id);
+
+      this.logger.log(
+        `📞 Call client connected: ${client.id} to namespace /call (User: ${userId})`,
+      );
+
+      client.emit('connection_ready', {
+        message: 'Connected to call service',
+        namespace: '/call',
+        socketId: client.id,
+        userId,
+        userType,
+      });
+    } catch (error) {
+      this.logger.error('Call connection authentication failed:', error);
+      client.emit('connection_error', {
+        error: 'Authentication failed',
+        message: 'Invalid or expired token',
+      });
+      client.disconnect();
+    }
+  }
+  handleDisconnect(client: Socket) {
+    const userId = client.data.userId || this.getUserIdBySocket(client.id);
+    if (userId) {
+      this.connectedUsers.delete(userId);
+      this.logger.log(`📞 User ${userId} disconnected from call service`);
     }
   }
 
@@ -131,5 +180,100 @@ export class CallGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (userSocketId) {
       this.server.to(userSocketId).emit(event, data);
     }
+  }
+
+  // Send incoming call notification
+  async sendIncomingCallNotification(targetUserId: string, callData: any) {
+    const userSocketId = this.connectedUsers.get(targetUserId);
+    if (userSocketId) {
+      this.server.to(userSocketId).emit('incoming_call', {
+        type: 'incoming_call',
+        ...callData,
+        timestamp: new Date(),
+      });
+      this.logger.log(
+        `Incoming call notification sent to user ${targetUserId}`,
+      );
+    } else {
+      this.logger.warn(`User ${targetUserId} not connected to call service`);
+    }
+  }
+
+  // Notify call accepted
+  async notifyCallAccepted(
+    callId: string,
+    acceptedBy: string,
+    targetUserId: string,
+  ) {
+    const userSocketId = this.connectedUsers.get(targetUserId);
+    if (userSocketId) {
+      this.server.to(userSocketId).emit('call_accepted', {
+        callId,
+        acceptedBy,
+        timestamp: new Date(),
+      });
+      this.logger.log(
+        `Call accepted notification sent to user ${targetUserId}`,
+      );
+    }
+  }
+
+  // Notify call declined
+  async notifyCallDeclined(
+    callId: string,
+    declinedBy: string,
+    targetUserId: string,
+  ) {
+    const userSocketId = this.connectedUsers.get(targetUserId);
+    if (userSocketId) {
+      this.server.to(userSocketId).emit('call_declined', {
+        callId,
+        declinedBy,
+        reason: 'user_declined',
+        timestamp: new Date(),
+      });
+      this.logger.log(
+        `Call declined notification sent to user ${targetUserId}`,
+      );
+    }
+  }
+
+  // Notify participant joined
+  async notifyParticipantJoined(
+    callId: string,
+    participantInfo: {
+      userId: string;
+      userRole: string;
+      device: string;
+      joinedAt: Date;
+    },
+  ): Promise<void> {
+    try {
+      // Notify all connected users in the call
+      for (const [userId, socketId] of this.connectedUsers.entries()) {
+        if (userId !== participantInfo.userId) {
+          this.server.to(socketId).emit('participant_joined', {
+            callId,
+            newParticipant: participantInfo,
+            timestamp: new Date(),
+          });
+        }
+      }
+
+      this.logger.log(
+        `📢 Notified participants about ${participantInfo.device} device joining call ${callId}`,
+      );
+    } catch (error) {
+      this.logger.error('Error notifying participant joined:', error);
+    }
+  }
+
+  private getUserIdBySocket(socketId: string): string | undefined {
+    for (const [userId, id] of this.connectedUsers.entries()) {
+      if (id === socketId) {
+        return userId;
+      }
+    }
+    return undefined;
   }
 }

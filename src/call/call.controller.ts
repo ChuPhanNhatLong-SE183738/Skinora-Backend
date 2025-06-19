@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   Logger,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -20,20 +21,23 @@ import {
 import { CallService } from './call.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { successResponse, errorResponse } from '../helper/response.helper';
-import { InitiateCallDto, AddCallNotesDto } from './dto/initiate-call.dto';
+import {
+  InitiateCallDto,
+  AddCallNotesDto,
+  JoinCallDto,
+} from './dto/initiate-call.dto';
 import { AgoraService } from './agora.service';
-import { CallWebSocketGateway } from '../websocket/websocket.gateway';
+import { CallGateway } from './call.gateway';
 import { RedisService } from '../websocket/redis.service';
 
-@ApiTags('calls')
-@Controller('calls')
+@ApiTags('call')
+@Controller('call')
 export class CallController {
   private readonly logger = new Logger(CallController.name);
-
   constructor(
     private readonly callService: CallService,
     private readonly agoraService: AgoraService,
-    private readonly webSocketGateway: CallWebSocketGateway,
+    private readonly callGateway: CallGateway,
     private readonly redisService: RedisService,
   ) {}
 
@@ -323,7 +327,7 @@ export class CallController {
 
       if (isTargetOnline) {
         // Send real-time notification via WebSocket
-        await this.webSocketGateway.sendIncomingCallNotification(targetUserId, {
+        await this.callGateway.sendIncomingCallNotification(targetUserId, {
           callId: callId,
           callerInfo,
           callType: initiateCallDto.callType,
@@ -1702,7 +1706,7 @@ joinChannel();
       );
 
       // Notify caller via WebSocket
-      await this.webSocketGateway.notifyCallAccepted(
+      await this.callGateway.notifyCallAccepted(
         callId,
         userId,
         otherParticipantId,
@@ -1766,7 +1770,7 @@ joinChannel();
       const otherParticipantId = this.getOtherParticipantId(call, userId);
 
       // Notify caller via WebSocket
-      await this.webSocketGateway.notifyCallDeclined(
+      await this.callGateway.notifyCallDeclined(
         callId,
         userId,
         otherParticipantId,
@@ -1881,7 +1885,11 @@ joinChannel();
       },
     },
   })
-  async joinExistingCall(@Param('id') callId: string, @Request() req) {
+  async joinExistingCall(
+    @Param('id') callId: string,
+    @Body() joinCallDto: JoinCallDto,
+    @Request() req,
+  ) {
     try {
       const userId = req.user.sub || req.user.id;
 
@@ -1996,27 +2004,27 @@ joinChannel();
               }
             : { _id: patientId, fullName: 'Unknown Patient', role: 'patient' };
       }
+      const device = joinCallDto?.device || 'mobile';
 
       // Update Redis cache for real-time tracking
       await this.redisService.addCallParticipant(callId, {
         userId,
         userRole,
-        device: 'mobile',
+        device,
         uid,
         joinedAt: new Date(),
         status: 'joined',
       });
 
       // Notify other participants via WebSocket
-      await this.webSocketGateway.notifyParticipantJoined(callId, {
+      await this.callGateway.notifyParticipantJoined(callId, {
         userId,
         userRole,
-        device: 'mobile',
+        device,
         joinedAt: new Date(),
       });
-
       this.logger.log(
-        `📱 Mobile user ${userId} (${userRole}) joined call ${callId} with UID ${uid}`,
+        `📱 ${device} user ${userId} (${userRole}) joined call ${callId} with UID ${uid}`,
       );
 
       return {
@@ -2034,11 +2042,11 @@ joinChannel();
           appointmentId: call.appointmentId || null, // Include appointmentId from call
           otherParticipant,
           joinedAt: new Date().toISOString(),
-          device: 'mobile',
+          device,
           instructions: {
             note: 'Use the same channelName as web to join the same call',
             webChannelName: call.roomId,
-            mobileUID: uid,
+            deviceUID: uid,
             tokenExpiry: '24 hours',
           },
           // Add debug info
@@ -2188,7 +2196,7 @@ joinChannel();
 
   private async sendWebSocketNotification(userId: string, payload: any) {
     // Use WebSocket gateway for notification
-    await this.webSocketGateway.sendIncomingCallNotification(userId, payload);
+    await this.callGateway.sendIncomingCallNotification(userId, payload);
     return { status: 'fulfilled', channel: 'websocket' };
   }
 
@@ -2303,6 +2311,677 @@ joinChannel();
         success: false,
         message: error.message,
       };
+    }
+  }
+
+  @Get('debug/call-details/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Debug: Get detailed call information' })
+  @ApiParam({ name: 'id', description: 'Call ID' })
+  async debugCallDetails(@Param('id') callId: string, @Request() req) {
+    try {
+      const userId = req.user.sub || req.user.id;
+
+      // Get call without population first
+      const rawCall = await this.callService.getCallByIdRaw(callId);
+
+      // Get call with population
+      const populatedCall = await this.callService.getCallById(callId);
+
+      return {
+        success: true,
+        message: 'Call details retrieved for debugging',
+        data: {
+          requestUserId: userId,
+          rawCall: {
+            _id: rawCall?._id,
+            patientId: rawCall?.patientId,
+            doctorId: rawCall?.doctorId,
+            appointmentId: rawCall?.appointmentId,
+            status: rawCall?.status,
+            callType: rawCall?.callType,
+            roomId: rawCall?.roomId,
+          },
+          populatedCall: {
+            _id: (populatedCall as any)?._id,
+            patientId: populatedCall?.patientId,
+            doctorId: populatedCall?.doctorId,
+            appointmentId: populatedCall?.appointmentId,
+            status: populatedCall?.status,
+            callType: populatedCall?.callType,
+            roomId: populatedCall?.roomId,
+          },
+          validation: {
+            hasAppointmentId: !!rawCall?.appointmentId,
+            appointmentIdValue: rawCall?.appointmentId?.toString() || null,
+            isUserAuthorized: {
+              isPatient: rawCall?.patientId?.toString() === userId,
+              isDoctor: rawCall?.doctorId?.toString() === userId,
+            },
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Debug failed',
+        error: error.message,
+        callId,
+      };
+    }
+  }
+
+  @Post('debug/test-agora-token')
+  @ApiOperation({
+    summary: 'Test Agora token generation with different parameters',
+  })
+  async testAgoraToken(
+    @Body()
+    body: {
+      channelName?: string;
+      uid?: number;
+      callId?: string;
+      testType?: string;
+    },
+  ) {
+    try {
+      const testChannelName = body.channelName || 'test_channel_' + Date.now();
+      const testUid = body.uid || Math.floor(Math.random() * 100000) + 1;
+      // Test different scenarios
+      const tests: any[] = [];
+
+      // Test 1: Simple channel name
+      try {
+        const simpleToken = this.agoraService.generateValidatedToken(
+          'test_simple',
+          testUid,
+          1,
+        );
+        tests.push({
+          name: 'Simple Channel',
+          channelName: 'test_simple',
+          uid: testUid,
+          success: true,
+          token: simpleToken.substring(0, 50) + '...',
+          tokenLength: simpleToken.length,
+        });
+      } catch (error) {
+        tests.push({
+          name: 'Simple Channel',
+          channelName: 'test_simple',
+          uid: testUid,
+          success: false,
+          error: error.message,
+        });
+      }
+
+      // Test 2: Complex channel name (like current format)
+      try {
+        const complexToken = this.agoraService.generateValidatedToken(
+          testChannelName,
+          testUid,
+          1,
+        );
+        tests.push({
+          name: 'Complex Channel',
+          channelName: testChannelName,
+          uid: testUid,
+          success: true,
+          token: complexToken.substring(0, 50) + '...',
+          tokenLength: complexToken.length,
+        });
+      } catch (error) {
+        tests.push({
+          name: 'Complex Channel',
+          channelName: testChannelName,
+          uid: testUid,
+          success: false,
+          error: error.message,
+        });
+      }
+
+      // Test 3: UID 0 (auto-assign)
+      try {
+        const autoToken = this.agoraService.generateValidatedToken(
+          testChannelName,
+          0,
+          1,
+        );
+        tests.push({
+          name: 'Auto UID (0)',
+          channelName: testChannelName,
+          uid: 0,
+          success: true,
+          token: autoToken.substring(0, 50) + '...',
+          tokenLength: autoToken.length,
+        });
+      } catch (error) {
+        tests.push({
+          name: 'Auto UID (0)',
+          channelName: testChannelName,
+          uid: 0,
+          success: false,
+          error: error.message,
+        });
+      }
+
+      // Test 4: If callId provided, test with actual call
+      if (body.callId) {
+        try {
+          const call = await this.callService.getCallByIdRaw(body.callId);
+          if (call) {
+            const callToken = this.agoraService.generateValidatedToken(
+              call.roomId,
+              testUid,
+              1,
+            );
+            tests.push({
+              name: 'Actual Call Channel',
+              channelName: call.roomId,
+              uid: testUid,
+              success: true,
+              token: callToken.substring(0, 50) + '...',
+              tokenLength: callToken.length,
+              callStatus: call.status,
+            });
+          }
+        } catch (error) {
+          tests.push({
+            name: 'Actual Call Channel',
+            callId: body.callId,
+            success: false,
+            error: error.message,
+          });
+        }
+      }
+
+      return {
+        success: true,
+        message: 'Agora token tests completed',
+        data: {
+          agoraConfig: this.agoraService.getConfiguration(),
+          tests,
+          recommendations: [
+            'If all tests fail: Check AGORA_APP_ID and AGORA_APP_CERTIFICATE in .env',
+            'If simple test passes but complex fails: Channel name format issue',
+            'If tokens generate but join fails: Client-side Agora SDK issue',
+            'Error -2: Invalid argument (token/channel/uid format)',
+            'Error -7: Not initialized (Agora SDK issue on client)',
+          ],
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Token test failed',
+        error: error.message,
+        agoraConfig: this.agoraService.getConfiguration(),
+      };
+    }
+  }
+
+  @Get('debug/agora-simple-test')
+  @ApiOperation({ summary: 'Simple Agora configuration test' })
+  async simpleAgoraTest() {
+    try {
+      const config = this.agoraService.getConfiguration();
+      // Try to generate a simple token
+      let tokenTest: any = null;
+      try {
+        const testToken = this.agoraService.generateValidatedToken(
+          'test123',
+          12345,
+          1,
+        );
+        tokenTest = {
+          success: true,
+          tokenLength: testToken.length,
+          tokenPreview: testToken.substring(0, 50) + '...',
+        };
+      } catch (error) {
+        tokenTest = {
+          success: false,
+          error: error.message,
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Agora simple test completed',
+        data: {
+          configuration: config,
+          tokenGeneration: tokenTest,
+          troubleshooting: {
+            'Error -2':
+              'ERR_INVALID_ARGUMENT - Check token format, channel name, or UID',
+            'Error -7':
+              'ERR_NOT_INITIALIZED - Agora engine not properly initialized on client',
+            'Next steps': [
+              '1. Verify AGORA_APP_ID and AGORA_APP_CERTIFICATE in .env',
+              '2. Check if client Agora SDK version matches server',
+              '3. Try with simpler channel name (no special characters)',
+              '4. Check if App Certificate is correct for the App ID',
+            ],
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Simple test failed',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('debug/test-token-roles')
+  @ApiOperation({ summary: 'Test Agora tokens with different roles' })
+  async testTokenRoles(@Body() body: { channelName?: string; uid?: number }) {
+    try {
+      const testChannel = body.channelName || 'test_simple_channel';
+      const testUid = body.uid || 12345;
+
+      const results: any[] = []; // Test PUBLISHER role
+      try {
+        const publisherToken = this.agoraService.generateTokenWithRole(
+          testChannel,
+          testUid,
+          'host',
+        ); // host = PUBLISHER role
+        results.push({
+          role: 'PUBLISHER',
+          success: true,
+          tokenLength: publisherToken.length,
+          tokenPreview: publisherToken.substring(0, 50) + '...',
+        });
+      } catch (error) {
+        results.push({
+          role: 'PUBLISHER',
+          success: false,
+          error: error.message,
+        });
+      } // Test SUBSCRIBER role
+      try {
+        const subscriberToken = this.agoraService.generateTokenWithRole(
+          testChannel,
+          testUid,
+          'audience',
+        ); // audience = SUBSCRIBER role
+        results.push({
+          role: 'SUBSCRIBER',
+          success: true,
+          tokenLength: subscriberToken.length,
+          tokenPreview: subscriberToken.substring(0, 50) + '...',
+        });
+      } catch (error) {
+        results.push({
+          role: 'SUBSCRIBER',
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Token role tests completed',
+        data: {
+          testParameters: {
+            channelName: testChannel,
+            uid: testUid,
+          },
+          results,
+          recommendations: [
+            'Try the SUBSCRIBER token if PUBLISHER fails',
+            'Simpler channel names often work better',
+            'Ensure client uses same UID as server-generated token',
+            'Check Agora console for project settings',
+          ],
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Token role test failed',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('debug/validate-token-backend')
+  @ApiOperation({ summary: 'Validate token from backend side using Agora API' })
+  async validateTokenBackend(
+    @Body() body: { token: string; channelName: string; uid: number },
+  ) {
+    try {
+      const { token, channelName, uid } = body;
+
+      // Validate token format
+      const tokenValid = token && token.length > 100 && token.startsWith('006');
+
+      // Try to parse token structure (basic validation)
+      const appIdFromToken = token.substring(3, 35); // Extract app ID from token
+      const expectedAppId = this.agoraService.getAppId();
+
+      // Generate fresh token for comparison
+      let freshToken = '';
+      try {
+        freshToken = this.agoraService.generateValidatedToken(
+          channelName,
+          uid,
+          1,
+        );
+      } catch (error) {
+        // Token generation failed
+      }
+
+      return {
+        success: true,
+        message: 'Token validation completed',
+        data: {
+          originalToken: {
+            provided: !!token,
+            length: token?.length || 0,
+            startsCorrectly: token?.startsWith('006') || false,
+            appIdInToken: appIdFromToken,
+            preview: token?.substring(0, 50) + '...',
+          },
+          expectedConfig: {
+            appId: expectedAppId,
+            channelName,
+            uid,
+          },
+          validation: {
+            tokenFormatValid: tokenValid,
+            appIdMatches: appIdFromToken === expectedAppId,
+            canGenerateNewToken: !!freshToken,
+          },
+          freshToken: {
+            generated: !!freshToken,
+            length: freshToken?.length || 0,
+            preview:
+              freshToken?.substring(0, 50) + '...' || 'Failed to generate',
+            matches: token === freshToken,
+          },
+          troubleshooting: {
+            'Backend Status': 'Token generation working',
+            'Issue Location': 'Client-side Agora SDK',
+            'Possible Causes': [
+              'Agora SDK version mismatch',
+              'Platform-specific Agora settings',
+              'Network/firewall blocking Agora servers',
+              'App Certificate mismatch in Agora Console',
+            ],
+            'Next Steps': [
+              '1. Check Agora Console project settings',
+              '2. Verify App Certificate is correct',
+              '3. Try different Agora SDK version',
+              '4. Test on different device/network',
+              '5. Check Agora server regions',
+            ],
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Token validation failed',
+        error: error.message,
+      };
+    }
+  }
+
+  @Get('debug/agora-console-check')
+  @ApiOperation({
+    summary: 'Check Agora Console configuration recommendations',
+  })
+  async agoraConsoleCheck() {
+    try {
+      const config = this.agoraService.getConfiguration();
+
+      return {
+        success: true,
+        message: 'Agora Console configuration check',
+        data: {
+          currentConfig: config,
+          consoleChecklist: {
+            'Project Status': 'Should be "Active" in Agora Console',
+            'App Certificate': 'Must match AGORA_APP_CERTIFICATE in .env',
+            Authentication: 'Should be "App ID + App Certificate"',
+            Services: 'RTC should be enabled',
+            Regions: 'Check if Asia-Pacific regions are enabled',
+            Security: 'Token authentication should be enabled',
+          },
+          commonIssues: {
+            'Error -2 (ERR_INVALID_ARGUMENT)': [
+              'App Certificate mismatch between console and .env',
+              'Token generated with wrong App Certificate',
+              'Channel name contains invalid characters',
+              'UID format issue (should be positive integer)',
+            ],
+            'Error -7 (ERR_NOT_INITIALIZED)': [
+              'Agora SDK not properly initialized on client',
+              'Network connectivity issues',
+              'Agora servers blocked by firewall',
+              'Wrong Agora SDK version for platform',
+            ],
+          },
+          recommendedActions: [
+            '1. Log into Agora Console (console.agora.io)',
+            '2. Verify project is Active and has correct App Certificate',
+            '3. Check if RTC service is enabled and properly configured',
+            '4. Test with Agora demo app to verify account setup',
+            '5. Ensure client app has proper network permissions',
+            '6. Try connecting from different network/device',
+          ],
+          testUrls: {
+            'Agora Console': 'https://console.agora.io',
+            'Agora Demo': 'https://webdemo.agora.io/basicVideoCall/index.html',
+            Documentation:
+              'https://docs.agora.io/en/Voice/start_call_audio_react_native',
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Console check failed',
+        error: error.message,
+      };
+    }
+  }
+
+  @Post('debug/minimal-test-config')
+  @ApiOperation({
+    summary: 'Generate minimal test configuration for client debugging',
+  })
+  async minimalTestConfig() {
+    try {
+      // Generate the simplest possible configuration
+      const simpleChannel = 'test123';
+      const simpleUid = 12345;
+
+      let testToken = '';
+      try {
+        testToken = this.agoraService.generateValidatedToken(
+          simpleChannel,
+          simpleUid,
+          24,
+        );
+      } catch (error) {
+        return {
+          success: false,
+          message: 'Cannot generate test token',
+          error: error.message,
+          action: 'Check AGORA_APP_ID and AGORA_APP_CERTIFICATE in .env file',
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Minimal test configuration generated',
+        data: {
+          // Minimal config for client testing
+          testConfig: {
+            appId: this.agoraService.getAppId(),
+            channelName: simpleChannel,
+            uid: simpleUid,
+            token: testToken,
+          },
+          // Client test code suggestions
+          clientTestSteps: {
+            'Step 1': 'Use this exact configuration in your client',
+            'Step 2': 'Initialize Agora engine with appId',
+            'Step 3': 'Join channel with token, channelName, and uid',
+            'Step 4':
+              'If still fails, issue is with Agora account/console setup',
+          },
+          reactNativeExample: {
+            init: `const engine = await RtcEngine.create('${this.agoraService.getAppId()}');`,
+            join: `await engine.joinChannel('${testToken}', '${simpleChannel}', null, ${simpleUid});`,
+          },
+          webExample: {
+            init: `const client = AgoraRTC.createClient({mode: 'rtc', codec: 'vp8'});`,
+            join: `await client.join('${this.agoraService.getAppId()}', '${simpleChannel}', '${testToken}', ${simpleUid});`,
+          },
+          // Debug URLs to test Agora account
+          testWithAgoraDemo: {
+            url: 'https://webdemo.agora.io/basicVideoCall/index.html',
+            instructions: 'Use your App ID to test if Agora account works',
+          },
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Minimal config generation failed',
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * DEBUG: Validate Agora token format and parameters
+   */
+  @Get('debug/validate-token')
+  async validateToken(@Query() query: any) {
+    try {
+      const { token, channelName, uid } = query;
+      if (!token || !channelName || !uid) {
+        return errorResponse(
+          'Missing required parameters: token, channelName, uid',
+        );
+      }
+
+      const validation = this.agoraService.validateToken(
+        token,
+        channelName,
+        parseInt(uid),
+      );
+
+      return successResponse(validation, 'Token validation completed');
+    } catch (error) {
+      this.logger.error('Error validating token:', error);
+      return errorResponse('Failed to validate token', error);
+    }
+  }
+
+  /**
+   * DEBUG: Test different UID formats for compatibility
+   */
+  @Get('debug/test-uid-formats/:channelName/:baseUid')
+  async testUidFormats(
+    @Param('channelName') channelName: string,
+    @Param('baseUid') baseUid: string,
+  ) {
+    try {
+      const uid = parseInt(baseUid);
+      const results = this.agoraService.testUidFormats(channelName, uid);
+      return successResponse(
+        {
+          baseUid: uid,
+          channelName: channelName,
+          results: results,
+        },
+        'UID format testing completed',
+      );
+    } catch (error) {
+      this.logger.error('Error testing UID formats:', error);
+      return errorResponse('Failed to test UID formats', error);
+    }
+  }
+
+  /**
+   * DEBUG: Generate simple test configuration for client testing
+   */
+  @Get('debug/simple-test-config')
+  async getSimpleTestConfig() {
+    try {
+      const config = this.agoraService.generateSimpleTestConfig();
+      return successResponse(
+        {
+          config: config,
+          clientInstructions: [
+            '1. Use the exact appId, channelName, uid, and token provided',
+            '2. Make sure your Agora SDK version is compatible (4.x recommended)',
+            '3. Check that you are using the correct RTC engine initialization',
+            '4. Verify your React Native Agora SDK setup',
+            '5. Test with a simple channel name first',
+          ],
+        },
+        'Simple test configuration generated',
+      );
+    } catch (error) {
+      this.logger.error('Error generating test config:', error);
+      return errorResponse('Failed to generate test config', error);
+    }
+  }
+
+  /**
+   * DEBUG: Comprehensive token analysis for debugging client join failures
+   */
+  @Get('debug/analyze-join-failure')
+  async analyzeJoinFailure(@Query() query: any) {
+    try {
+      const { appId, channelName, uid, token, errorCode } = query;
+
+      const analysis = {
+        providedData: {
+          appId: appId || 'Not provided',
+          channelName: channelName || 'Not provided',
+          uid: uid || 'Not provided',
+          token: token ? `${token.substring(0, 20)}...` : 'Not provided',
+          errorCode: errorCode || 'Not provided',
+        },
+        expectedData: {
+          appId: this.agoraService['appId'],
+          tokenValidation:
+            token && channelName && uid
+              ? this.agoraService.validateToken(
+                  token,
+                  channelName,
+                  parseInt(uid || '0'),
+                )
+              : 'Cannot validate - missing parameters',
+        },
+        commonIssues: {
+          errorCode2:
+            'Invalid argument - Check UID format, channel name, or token',
+          errorCode7: 'Not initialized - Check Agora SDK initialization',
+          errorCode17: 'Token expired - Generate new token',
+          errorCode101: 'Invalid app ID - Check app ID configuration',
+          errorCode109: 'Token privilege expired - Check token expiration',
+        },
+        troubleshooting: {
+          uidRange: 'UID must be 0-4294967295 (32-bit unsigned integer)',
+          channelName: 'Channel name should be alphanumeric, max 64 chars',
+          tokenFormat: 'Token should start with your app ID',
+          sdkVersion: 'Use Agora RTC SDK 4.x for best compatibility',
+        },
+      };
+      return successResponse(analysis, 'Join failure analysis completed');
+    } catch (error) {
+      this.logger.error('Error analyzing join failure:', error);
+      return errorResponse('Failed to analyze join failure', error);
     }
   }
 }

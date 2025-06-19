@@ -19,6 +19,7 @@ import { join } from 'path';
 import { ChatMessagesModule } from './chat_messages/chat_messages.module';
 import { ChatHistoryModule } from './chat_history/chat_history.module';
 import { WebSocketModule } from './websocket/websocket.module';
+import { CallModule } from './call/call.module';
 
 @Module({
   imports: [
@@ -26,7 +27,9 @@ import { WebSocketModule } from './websocket/websocket.module';
       isGlobal: true,
     }),
     MongooseModule.forRoot(
-      process.env.MONGODB_URI || 'mongodb://localhost:27017/skinora',
+      process.env.DB_CONNECTION_LINK ||
+        process.env.MONGODB_URI ||
+        'mongodb://localhost:27017/skinora',
     ),
     AuthModule,
     UsersModule,
@@ -44,6 +47,7 @@ import { WebSocketModule } from './websocket/websocket.module';
     ChatMessagesModule,
     ChatHistoryModule,
     WebSocketModule,
+    CallModule,
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',

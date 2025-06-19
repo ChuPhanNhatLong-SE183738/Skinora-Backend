@@ -121,6 +121,19 @@ export class AgoraService {
     return `${callType}_${timestamp}_${random}`;
   }
 
+  // Generate simple channel name (for better compatibility)
+  generateSimpleChannelName(callId: string): string {
+    // Use just the last 8 characters of callId for shorter channel name
+    const shortId = callId.slice(-8);
+    return `call_${shortId}`;
+  }
+
+  // Generate very simple channel name
+  generateMinimalChannelName(): string {
+    const timestamp = Date.now().toString().slice(-6); // Last 6 digits
+    return `c${timestamp}`;
+  }
+
   // Debug method to check configuration
   getConfiguration() {
     return {
@@ -209,4 +222,176 @@ export class AgoraService {
       timestamp: Date.now(),
     };
   }
+
+  // Generate token with subscriber role (for testing)
+  generateSubscriberToken(
+    channelName: string,
+    uid: number,
+    hoursValid: number = 24,
+  ): string {
+    if (!this.isConfigured()) {
+      throw new Error('Agora credentials not configured');
+    }
+
+    const expirationTimeInSeconds =
+      Math.floor(Date.now() / 1000) + hoursValid * 3600;
+
+    try {
+      const token = RtcTokenBuilder.buildTokenWithUid(
+        this.appId!,
+        this.appCertificate!,
+        channelName,
+        uid,
+        RtcRole.SUBSCRIBER, // Use SUBSCRIBER role
+        expirationTimeInSeconds,
+      );
+
+      this.logger.log(
+        `🎫 Generated SUBSCRIBER token for channel: ${channelName}`,
+      );
+      return token;
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to generate subscriber token: ${error.message}`,
+      );
+      throw new Error(`Failed to generate subscriber token: ${error.message}`);
+    }
+  }
+
+  /**
+   * Validate and decode Agora token information
+   */
+  validateToken(token: string, channelName: string, uid: number): any {
+    try {
+      // Basic token format validation
+      if (!token || token.length < 100) {
+        return {
+          valid: false,
+          error: 'Token too short or missing',
+        };
+      } // Check if token starts with app ID
+      const expectedStart = this.appId || '';
+      const tokenStart = token.substring(0, expectedStart.length);
+
+      if (tokenStart !== expectedStart) {
+        return {
+          valid: false,
+          error: 'Token does not start with correct app ID',
+          expected: expectedStart,
+          actual: tokenStart,
+        };
+      }
+
+      // Generate a test token with same parameters to compare
+      const testToken = this.generateRtcToken(channelName, uid);
+      const testTokenStart = testToken.substring(0, 50);
+      const actualTokenStart = token.substring(0, 50);
+
+      return {
+        valid: true,
+        tokenLength: token.length,
+        startsWithAppId: tokenStart === expectedStart,
+        channelName: channelName,
+        uid: uid,
+        appId: this.appId,
+        comparison: {
+          providedTokenStart: actualTokenStart,
+          generatedTokenStart: testTokenStart,
+          tokensMatch: testToken === token,
+        },
+        analysis: {
+          hasCorrectFormat: token.includes(this.appId || ''),
+          lengthOk: token.length > 100 && token.length < 500,
+          containsBase64: /[A-Za-z0-9+/]/.test(
+            token.substring((this.appId || '').length),
+          ),
+        },
+      };
+    } catch (error) {
+      return {
+        valid: false,
+        error: `Token validation failed: ${(error as any).message}`,
+      };
+    }
+  }
+
+  /**
+   * Generate token with specific role for testing
+   */
+  generateTokenWithRole(
+    channelName: string,
+    uid: number,
+    role: 'host' | 'audience' = 'host',
+  ): string {
+    const agoraRole = role === 'host' ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const privilegeExpiredTs = currentTimestamp + 24 * 3600; // 24 hours
+
+    return RtcTokenBuilder.buildTokenWithUid(
+      this.appId || '',
+      this.appCertificate || '',
+      channelName,
+      uid,
+      agoraRole,
+      privilegeExpiredTs,
+    );
+  }
+
+  /**
+   * Test different UID formats for compatibility
+   */ testUidFormats(channelName: string, baseUid: number) {
+    const results: any[] = [];
+
+    // Test different UID formats
+    const testUids = [
+      baseUid, // Original
+      Math.abs(baseUid), // Absolute value
+      baseUid % 4294967295, // 32-bit max
+      parseInt(baseUid.toString().substring(0, 8)), // Truncated
+    ];
+
+    for (const uid of testUids) {
+      try {
+        const token = this.generateRtcToken(channelName, uid);
+        results.push({
+          uid: uid,
+          token: token.substring(0, 50) + '...',
+          success: true,
+        });
+      } catch (error) {
+        results.push({
+          uid: uid,
+          error: (error as any).message,
+          success: false,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Generate simple test configuration for debugging
+   */
+  generateSimpleTestConfig() {
+    const simpleChannel = 'test_' + Date.now();
+    const simpleUid = Math.floor(Math.random() * 1000000);
+    const token = this.generateRtcToken(simpleChannel, simpleUid);
+
+    return {
+      appId: this.appId,
+      channelName: simpleChannel,
+      uid: simpleUid,
+      token: token,
+      tokenInfo: this.validateToken(token, simpleChannel, simpleUid),
+      instructions: {
+        note: 'Use these exact values for testing',
+        appIdCheck: `Token should start with: ${this.appId}`,
+        uidNote: 'UID must be positive integer',
+        channelNote: 'Channel name must be same for all participants',
+      },
+    };
+  }
+
+  // ...existing code...
 }

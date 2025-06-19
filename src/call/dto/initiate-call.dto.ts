@@ -40,3 +40,14 @@ export class AddCallNotesDto {
   @IsString()
   notes: string;
 }
+
+export class JoinCallDto {
+  @ApiProperty({
+    description: 'Device type joining the call',
+    enum: ['mobile', 'web'],
+    default: 'mobile',
+  })
+  @IsOptional()
+  @IsEnum(['mobile', 'web'])
+  device?: 'mobile' | 'web';
+}
