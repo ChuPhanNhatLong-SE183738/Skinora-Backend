@@ -1,0 +1,62 @@
+# Node modules and dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Docker
+.env
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+.nyc_output
+
+# Build outputs
+dist/
+build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Uploads (comment out if you want to include in image)
+# uploads/
+
+# SSL certificates
+docker/ssl/
+
+# Database data
+data/
+
+# Large files
+*.zip
+*.tar.gz
+*.tar

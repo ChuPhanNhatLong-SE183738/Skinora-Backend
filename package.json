@@ -43,7 +43,7 @@
     "ioredis": "^5.6.1",
     "mongoose": "^8.15.1",
     "multer": "^2.0.1",
-    "onnxruntime-node": "^1.22.0-rev",
+    "onnxruntime-node": "1.18.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
     "redis": "^5.5.6",

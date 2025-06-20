@@ -1,0 +1,76 @@
+# Multi-stage build for production
+
+# ----------------- Build Stage -----------------
+# Use an official Node.js image based on Debian 12 (Bookworm)
+# This provides a well-configured environment for Node.js and glibc
+FROM node:20-bookworm AS builder
+
+# Install build tools needed for some native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ \
+    libvips-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files and install all dependencies for building
+COPY package*.json ./
+# Use npm ci for reproducible builds
+RUN npm ci
+
+# Copy the rest of the application source code
+COPY . .
+
+# Build the application
+# Increase Node.js memory limit for build
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN npm run build
+
+# After build, prune dev dependencies to get production node_modules
+RUN npm prune --production
+
+
+# ----------------- Production Stage -----------------
+FROM node:20-bookworm-slim AS production
+
+# Install runtime dependencies for onnxruntime-node and other native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libvips \
+    && rm -rf /var/lib/apt/lists/*
+
+# ONNX Runtime for Node.js sometimes looks for the dynamic loader in /lib64.
+# The node:20-bookworm-slim image (based on Debian) has it in /lib/x86_64-linux-gnu/.
+# We create a symbolic link for compatibility.
+RUN mkdir -p /lib64 && ln -sf /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /lib64/ld-linux-x86-64.so.2
+
+WORKDIR /app
+
+# Create a non-root user to run the application
+RUN groupadd -g 1001 nodejs && useradd -r -u 1001 -g nodejs nestjs
+
+# Copy built application, node_modules, and package files from the build stage
+COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
+COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nestjs:nodejs /app/package*.json ./
+
+# Copy models and healthcheck script
+# Ensure models directory exists, even if empty
+RUN mkdir -p models
+COPY --from=builder --chown=nestjs:nodejs /app/models ./models
+COPY --from=builder --chown=nestjs:nodejs /app/healthcheck.js ./healthcheck.js
+
+# Create and set permissions for the uploads directory
+RUN mkdir -p uploads/chat uploads/skin-analysis && chown -R nestjs:nodejs uploads
+
+# Switch to the non-root user
+USER nestjs
+
+EXPOSE 3000
+
+# Health check to ensure the application is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD ["node", "healthcheck.js"]
+
+# Command to run the application
+CMD ["node", "dist/main.js"]

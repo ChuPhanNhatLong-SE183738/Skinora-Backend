@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.glibc
+      target: development
+    container_name: skinora-backend-dev
+    ports:
+      - '3000:3000'
+      - '9229:9229' # Debug port
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongo:27017/skinora_dev
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-secret-key
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - ./uploads:/app/uploads
+      - ./models:/app/models
+    depends_on:
+      - mongo
+      - redis
+    networks:
+      - skinora-network
+    command: npm run start:debug
+
+  mongo:
+    environment:
+      - MONGO_INITDB_DATABASE=skinora_dev
+
+networks:
+  skinora-network:
+    external: true

@@ -9,7 +9,8 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import * as ort from 'onnxruntime-node';
+// TODO: Re-enable when onnxruntime-node is working in Docker
+// import * as ort from 'onnxruntime-node';
 import * as sharp from 'sharp';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -56,64 +57,82 @@ export class AnalysisService {
     this.initModel();
   }
 
-  async getUserWeeklyAnalysisCount(userId: string, since: Date): Promise<number> {
+  async getUserWeeklyAnalysisCount(
+    userId: string,
+    since: Date,
+  ): Promise<number> {
     // Assuming you have an Analysis mongoose model injected as this.analysisModel
-    return this.analysisModel.countDocuments({
-      userId,
-      createdAt: { $gte: since }
-    }).exec();
+    return this.analysisModel
+      .countDocuments({
+        userId,
+        createdAt: { $gte: since },
+      })
+      .exec();
   }
-  
+
   // Add this new method to validate user's analysis eligibility
-  async validateUserAnalysisEligibility(userId: string): Promise<{ canAnalyze: boolean; subscriptionId?: string; message?: string }> {
+  async validateUserAnalysisEligibility(
+    userId: string,
+  ): Promise<{
+    canAnalyze: boolean;
+    subscriptionId?: string;
+    message?: string;
+  }> {
     try {
       // First, check if user has an active subscription
-      const subscription = await this.subscriptionService.getCurrentSubscription(userId);
-      
+      const subscription =
+        await this.subscriptionService.getCurrentSubscription(userId);
+
       if (subscription) {
         // User has a subscription, check if they have available AI tokens
         if (subscription.status === 'active') {
           if (subscription.aiUsageUsed < subscription.aiUsageAmount) {
-            return { 
-              canAnalyze: true, 
+            return {
+              canAnalyze: true,
               subscriptionId: subscription._id.toString(),
-              message: `You have ${subscription.aiUsageAmount - subscription.aiUsageUsed} analyses remaining in your subscription.`
+              message: `You have ${subscription.aiUsageAmount - subscription.aiUsageUsed} analyses remaining in your subscription.`,
             };
           } else {
-            return { 
+            return {
               canAnalyze: false,
               subscriptionId: subscription._id.toString(),
               message: `You have used all available skin analyses in your subscription plan (${subscription.aiUsageUsed}/${subscription.aiUsageAmount}).`,
             };
           }
         } else {
-          return { 
+          return {
             canAnalyze: false,
             subscriptionId: subscription._id.toString(),
             message: `Your subscription is not active (current status: ${subscription.status}).`,
           };
         }
-      } 
-      
+      }
+
       // No active subscription, check weekly free usage
       const oneWeekAgo = new Date();
       oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-      
-      const weeklyAnalysisCount = await this.getUserWeeklyAnalysisCount(userId, oneWeekAgo);
-      
+
+      const weeklyAnalysisCount = await this.getUserWeeklyAnalysisCount(
+        userId,
+        oneWeekAgo,
+      );
+
       if (weeklyAnalysisCount < 3) {
-        return { 
+        return {
           canAnalyze: true,
           message: `Free analysis ${weeklyAnalysisCount + 1}/3 this week. Consider subscribing for unlimited analyses.`,
         };
       } else {
-        return { 
+        return {
           canAnalyze: false,
-          message: 'You have used all 3 free weekly skin analyses. Please subscribe to a plan for more analyses.',
+          message:
+            'You have used all 3 free weekly skin analyses. Please subscribe to a plan for more analyses.',
         };
       }
     } catch (error) {
-      this.logger.error(`Error validating analysis eligibility: ${error.message}`);
+      this.logger.error(
+        `Error validating analysis eligibility: ${error.message}`,
+      );
       throw error;
     }
   }
@@ -380,7 +399,7 @@ export class AnalysisService {
   ): Promise<any> {
     // First validate if the user can perform analysis
     const eligibility = await this.validateUserAnalysisEligibility(userId);
-    
+
     if (!eligibility.canAnalyze) {
       throw new ForbiddenException(eligibility.message);
     }
