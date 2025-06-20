@@ -23,14 +23,6 @@ services:
       - redis
     networks:
       - skinora-network
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-          cpus: '1.0'
-        reservations:
-          memory: 512M
-          cpus: '0.5'
 
   mongo:
     image: mongo:7-jammy
@@ -47,11 +39,6 @@ services:
       - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - skinora-network
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '0.5'
 
   redis:
     image: redis:7-alpine
@@ -62,26 +49,6 @@ services:
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     volumes:
       - redis_data:/data
-    networks:
-      - skinora-network
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.25'
-
-  nginx:
-    image: nginx:alpine
-    container_name: skinora-nginx
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/ssl:/etc/ssl/certs:ro
-    depends_on:
-      - app
     networks:
       - skinora-network
 
