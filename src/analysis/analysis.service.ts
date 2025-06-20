@@ -9,8 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-// TODO: Re-enable when onnxruntime-node is working in Docker
-// import * as ort from 'onnxruntime-node';
+import * as ort from 'onnxruntime-node';
 import * as sharp from 'sharp';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -71,9 +70,7 @@ export class AnalysisService {
   }
 
   // Add this new method to validate user's analysis eligibility
-  async validateUserAnalysisEligibility(
-    userId: string,
-  ): Promise<{
+  async validateUserAnalysisEligibility(userId: string): Promise<{
     canAnalyze: boolean;
     subscriptionId?: string;
     message?: string;
