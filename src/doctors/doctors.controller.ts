@@ -8,7 +8,14 @@ import {
   Delete,
   UseGuards,
   Request,
+  UseInterceptors,
+  UploadedFile,
+  Logger,
+  HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname } from 'path';
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
@@ -23,14 +30,24 @@ import {
   ApiOperation, 
   ApiResponse, 
   ApiParam, 
-  ApiBody 
+  ApiBody,
+  ApiConsumes 
 } from '@nestjs/swagger';
 import { DoctorLoginDto } from './dto/doctor-login.dto';
+import { successResponse, errorResponse } from '../helper/response.helper';
 
 @ApiTags('doctors')
 @Controller('doctors')
 export class DoctorsController {
-  constructor(private readonly doctorsService: DoctorsService) {}
+  private readonly logger = new Logger(DoctorsController.name);
+
+  constructor(private readonly doctorsService: DoctorsService) {
+    // Ensure upload directory exists
+    const uploadDir = './uploads/doctors';
+    if (!require('fs').existsSync(uploadDir)) {
+      require('fs').mkdirSync(uploadDir, { recursive: true });
+    }
+  }
 
   @Post('auth/login')
   @ApiOperation({ summary: 'Doctor login' })
@@ -418,7 +435,7 @@ export class DoctorsController {
     };
   }
 
-  @Get('auth/profile')
+  @Get('profile')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get doctor profile (authenticated)' })
@@ -450,7 +467,7 @@ export class DoctorsController {
     }
   }
 
-  @Patch('auth/profile')
+  @Patch('profile')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update doctor profile (authenticated)' })
@@ -474,6 +491,199 @@ export class DoctorsController {
         success: false,
         message: error.message,
       };
+    }
+  }
+
+  @Patch('photo')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ 
+    summary: 'Update doctor photo URL (authenticated)',
+    description: 'Allows an authenticated doctor to update their profile photo URL'
+  })
+  @ApiBody({
+    description: 'Photo URL to update',
+    schema: {
+      type: 'object',
+      properties: {
+        photoUrl: {
+          type: 'string',
+          description: 'Valid URL for the doctor\'s profile photo',
+          example: 'https://example.com/photos/doctor-profile.jpg'
+        }
+      },
+      required: ['photoUrl']
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Doctor photo updated successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Doctor photo updated successfully',
+        data: {
+          _id: '675a8b4c12345678901234ab',
+          fullName: 'Dr. John Smith',
+          email: 'doctor@skinora.com',
+          photoUrl: 'https://example.com/photos/doctor-profile.jpg',
+          specializations: ['Dermatology'],
+          experience: 5,
+          updatedAt: '2025-06-21T14:30:00.000Z'
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid photo URL or doctor ID',
+    schema: {
+      example: {
+        success: false,
+        message: 'Invalid photo URL format'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Doctor not found',
+    schema: {
+      example: {
+        success: false,
+        message: 'Doctor not found'
+      }
+    }
+  })
+  async updateDoctorPhoto(
+    @Request() req,
+    @Body('photoUrl') photoUrl: string,
+  ) {
+    try {
+      const doctorId = req.user.sub || req.user.doctorId;
+      const result = await this.doctorsService.updateDoctorPhoto(doctorId, photoUrl);
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
+  @Post('upload-photo')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      storage: diskStorage({
+        destination: './uploads/doctors',
+        filename: (req, file, callback) => {
+          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+          const ext = extname(file.originalname);
+          callback(null, `doctor-${uniqueSuffix}${ext}`);
+        },
+      }),
+      fileFilter: (req, file, callback) => {
+        if (!file.mimetype.match(/\/(jpg|jpeg|png|gif)$/)) {
+          return callback(new Error('Only image files (jpg, jpeg, png, gif) are allowed!'), false);
+        }
+        callback(null, true);
+      },
+      limits: {
+        fileSize: 5 * 1024 * 1024, // 5MB limit
+      },
+    })
+  )
+  @ApiOperation({ 
+    summary: 'Upload doctor profile photo (authenticated)',
+    description: 'Allows an authenticated doctor to upload a new profile photo directly'
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Photo file to upload',
+    schema: {
+      type: 'object',
+      properties: {
+        photo: {
+          type: 'string',
+          format: 'binary',
+          description: 'Profile photo file (jpg, jpeg, png, gif, max 5MB)'
+        }
+      },
+      required: ['photo']
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Doctor photo uploaded and updated successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Doctor photo uploaded successfully',
+        data: {
+          _id: '675a8b4c12345678901234ab',
+          fullName: 'Dr. John Smith',
+          email: 'doctor@skinora.com',
+          photoUrl: 'http://localhost:3000/uploads/doctors/doctor-1640995200000-123456789.jpg',
+          specializations: ['Dermatology'],
+          experience: 5,
+          updatedAt: '2025-06-21T14:30:00.000Z'
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid file type or size',
+    schema: {
+      example: {
+        success: false,
+        message: 'Only image files (jpg, jpeg, png, gif) are allowed!'
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Doctor not found',
+    schema: {
+      example: {
+        success: false,
+        message: 'Doctor not found'
+      }
+    }
+  })
+  async uploadDoctorPhoto(
+    @Request() req,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    try {
+      this.logger.log(`Received photo upload request. File: ${file ? 'present' : 'missing'}`);
+
+      if (!file) {
+        this.logger.error('No file received in upload request');
+        return errorResponse('No photo file provided', HttpStatus.BAD_REQUEST);
+      }
+
+      this.logger.log(`File details: ${file.originalname}, size: ${file.size}, mimetype: ${file.mimetype}`);
+
+      const doctorId = req.user.sub || req.user.doctorId;
+      
+      // Construct the photo URL
+      const photoUrl = `${req.protocol}://${req.get('host')}/uploads/doctors/${file.filename}`;
+      
+      this.logger.log(`Updating doctor photo for doctor: ${doctorId} with URL: ${photoUrl}`);
+
+      const result = await this.doctorsService.updateDoctorPhoto(doctorId, photoUrl);
+      
+      this.logger.log(`Doctor photo uploaded successfully for doctor: ${doctorId}`);
+
+      return successResponse(
+        result.data,
+        'Doctor photo uploaded successfully'
+      );
+    } catch (error) {
+      this.logger.error(`Error during photo upload: ${error.message}`, error.stack);
+      return errorResponse(error.message, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }

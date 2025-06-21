@@ -211,19 +211,25 @@ export class DoctorsService {
 
     return { deleted: true };
   }
-
   async updateAvailability(id: string, availability: any) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid doctor ID format');
     }
 
+    // Process the new availability to ensure proper format
     const processedAvailability = processWeeklyAvailability(availability);
 
+    // Completely replace the availability object to ensure old slots are removed
     const doctor = await this.doctorModel
       .findByIdAndUpdate(
         id,
-        { availability: processedAvailability },
-        { new: true },
+        { 
+          $set: { 
+            availability: processedAvailability,
+            updatedAt: new Date()
+          }
+        },
+        { new: true, runValidators: true }
       )
       .exec();
 
@@ -267,5 +273,60 @@ export class DoctorsService {
     }
 
     return doctor;
+  }
+
+  /**
+   * Update doctor's photo URL
+   */
+  async updateDoctorPhoto(doctorId: string, photoUrl: string) {
+    // Validate doctor ID
+    if (!Types.ObjectId.isValid(doctorId)) {
+      throw new BadRequestException('Invalid doctor ID');
+    }
+
+    // Validate photo URL format (basic validation)
+    if (!photoUrl || typeof photoUrl !== 'string') {
+      throw new BadRequestException('Valid photo URL is required');    }
+
+    // More flexible URL validation that handles localhost and local development
+    const urlPattern = /^(https?:\/\/)?(localhost|[\da-z\.-]+)(:\d+)?(\/[\w \.-]*)*\/?$/i;
+    if (!urlPattern.test(photoUrl)) {
+      throw new BadRequestException('Invalid photo URL format');
+    }
+
+    try {
+      const updatedDoctor = await this.doctorModel
+        .findByIdAndUpdate(
+          doctorId,
+          { 
+            $set: { 
+              photoUrl: photoUrl,
+              updatedAt: new Date()
+            }
+          },
+          { 
+            new: true,
+            runValidators: true
+          }
+        )
+        .select('-password')
+        .populate('specializations')
+        .exec();
+
+      if (!updatedDoctor) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      return {
+        success: true,
+        message: 'Doctor photo updated successfully',
+        data: updatedDoctor
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to update doctor photo');
+    }
   }
 }

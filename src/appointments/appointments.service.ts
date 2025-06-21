@@ -213,31 +213,29 @@ export class AppointmentsService {
       );
     }
   }
-
   async findAll() {
     return await this.appointmentModel
       .find()
-      .populate('userId', 'fullName email')
-      .populate('doctorId', 'fullName email')
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .exec();
   }
-
   async findByUser(userId: string) {
     return await this.appointmentModel
       .find({ userId: new Types.ObjectId(userId) })
-      .populate('doctorId', 'fullName email photoUrl')
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .sort({ startTime: 1 })
       .exec();
   }
-
   async findByDoctor(doctorId: string) {
     return await this.appointmentModel
       .find({ doctorId: new Types.ObjectId(doctorId) })
-      .populate('userId', 'fullName email')
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .sort({ startTime: 1 })
       .exec();
   }
-
   async findOne(id: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid appointment ID format');
@@ -245,8 +243,8 @@ export class AppointmentsService {
 
     const appointment = await this.appointmentModel
       .findById(id)
-      .populate('userId', 'fullName email')
-      .populate('doctorId', 'fullName email')
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .exec();
 
     if (!appointment) {
@@ -270,7 +268,6 @@ export class AppointmentsService {
 
     return appointment;
   }
-
   async update(id: string, updateAppointmentDto: UpdateAppointmentDto) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid appointment ID format');
@@ -278,6 +275,8 @@ export class AppointmentsService {
 
     const appointment = await this.appointmentModel
       .findByIdAndUpdate(id, updateAppointmentDto, { new: true })
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .exec();
 
     if (!appointment) {
@@ -286,7 +285,6 @@ export class AppointmentsService {
 
     return appointment;
   }
-
   /**
    * Updates appointment status and handles related subscription meeting tracking
    */
@@ -300,6 +298,8 @@ export class AppointmentsService {
 
     const appointment = await this.appointmentModel
       .findByIdAndUpdate(id, { appointmentStatus: status }, { new: true })
+      .populate('userId', 'fullName email phoneNumber profilePicture')
+      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
       .exec();
 
     if (!appointment) {
