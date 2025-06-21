@@ -212,12 +212,12 @@ export class AppointmentsService {
         `Failed to create appointment: ${error.message}`,
       );
     }
-  }
-  async findAll() {
+  }  async findAll() {
     return await this.appointmentModel
       .find()
       .populate('userId', 'fullName email phoneNumber profilePicture')
       .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .sort({ startTime: -1 }) // Sort by newest first
       .exec();
   }
   async findByUser(userId: string) {
