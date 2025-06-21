@@ -30,9 +30,8 @@ export class Doctor {
   @Prop({ default: true })
   isActive: boolean;
 
-  @Prop({ default: false })
+  @Prop({ default: true })
   isVerified: boolean;
-
   @Prop({
     type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Specialization' }],
   })
@@ -40,6 +39,9 @@ export class Doctor {
 
   @Prop()
   photoUrl: string;
+
+  @Prop({ type: Number, min: 0, max: 50 })
+  experience: number;
 
   @Prop({ type: Object })
   availability: {

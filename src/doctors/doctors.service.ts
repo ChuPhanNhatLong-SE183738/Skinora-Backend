@@ -140,11 +140,46 @@ export class DoctorsService {
       throw new UnauthorizedException('Invalid doctor token');
     }
   }
+  async findAll(filters?: {
+    isActive?: boolean;
+    name?: string;
+    email?: string;
+    verified?: boolean;
+  }) {
+    // Build the query object
+    const query: any = {};
 
-  async findAll() {
+    // Filter by active status if provided
+    if (filters?.isActive !== undefined) {
+      query.isActive = filters.isActive;
+    }
+
+    // Filter by verified status if provided
+    if (filters?.verified !== undefined) {
+      query.isVerified = filters.verified;
+    }
+
+    // Filter by name (case-insensitive partial match)
+    if (filters?.name) {
+      query.fullName = { 
+        $regex: filters.name, 
+        $options: 'i' // case-insensitive
+      };
+    }
+
+    // Filter by email (case-insensitive partial match)
+    if (filters?.email) {
+      query.email = { 
+        $regex: filters.email, 
+        $options: 'i' // case-insensitive
+      };
+    }
+
     return this.doctorModel
-      .find({ isActive: true })
+      .find(query)
+      .select('-password -skinAnalysisHistory -purchaseHistory') // Exclude sensitive fields
       .populate('specializations')
+      .sort({ createdAt: -1 }) // Sort by newest first
       .exec();
   }
 
@@ -327,6 +362,96 @@ export class DoctorsService {
         throw error;
       }
       throw new BadRequestException('Failed to update doctor photo');
+    }
+  }
+
+  /**
+   * Deactivate a doctor account
+   */
+  async deactivateDoctor(doctorId: string) {
+    // Validate doctor ID
+    if (!Types.ObjectId.isValid(doctorId)) {
+      throw new BadRequestException('Invalid doctor ID');
+    }
+
+    try {
+      const updatedDoctor = await this.doctorModel
+        .findByIdAndUpdate(
+          doctorId,
+          { 
+            $set: { 
+              isActive: false,
+              updatedAt: new Date()
+            }
+          },
+          { 
+            new: true,
+            runValidators: true
+          }
+        )
+        .select('-password')
+        .populate('specializations')
+        .exec();
+
+      if (!updatedDoctor) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      return {
+        success: true,
+        message: 'Doctor account deactivated successfully',
+        data: updatedDoctor
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to deactivate doctor account');
+    }
+  }
+
+  /**
+   * Reactivate a doctor account
+   */
+  async reactivateDoctor(doctorId: string) {
+    // Validate doctor ID
+    if (!Types.ObjectId.isValid(doctorId)) {
+      throw new BadRequestException('Invalid doctor ID');
+    }
+
+    try {
+      const updatedDoctor = await this.doctorModel
+        .findByIdAndUpdate(
+          doctorId,
+          { 
+            $set: { 
+              isActive: true,
+              updatedAt: new Date()
+            }
+          },
+          { 
+            new: true,
+            runValidators: true
+          }
+        )
+        .select('-password')
+        .populate('specializations')
+        .exec();
+
+      if (!updatedDoctor) {
+        throw new NotFoundException('Doctor not found');
+      }
+
+      return {
+        success: true,
+        message: 'Doctor account reactivated successfully',
+        data: updatedDoctor
+      };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to reactivate doctor account');
     }
   }
 }

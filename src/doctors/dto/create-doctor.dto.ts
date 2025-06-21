@@ -1,4 +1,4 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength, IsOptional, IsDate, IsBoolean, IsArray, ValidateNested, IsObject } from 'class-validator';
+import { IsEmail, IsString, IsNotEmpty, MinLength, IsOptional, IsDate, IsBoolean, IsArray, ValidateNested, IsObject, IsNumber, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { TimeRange, WeeklyAvailability } from '../utils/availability.util';
@@ -95,10 +95,22 @@ export class CreateDoctorDto {
   @IsOptional()
   @IsArray()
   specializations?: string[];
-
   @IsString()
   @IsOptional()
   photoUrl?: string;
+
+  @ApiProperty({ 
+    description: 'Years of medical experience',
+    example: 8,
+    minimum: 0,
+    maximum: 50,
+    required: false
+  })
+  @IsNumber()
+  @Min(0)
+  @Max(50)
+  @IsOptional()
+  experience?: number;
 
   @IsObject()
   @ValidateNested()
