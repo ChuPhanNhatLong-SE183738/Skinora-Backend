@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -19,6 +20,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 
 @ApiTags('users')
@@ -73,18 +75,44 @@ export class UsersController {
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }
-
   @Get()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: 'Get all users',
-    description:
-      'Retrieve a list of all users (passwords excluded for security)',
+    summary: 'Get all users with optional filtering',
+    description: 'Retrieve all users with optional filters for active status, name, email, and verification status'
+  })
+  @ApiQuery({
+    name: 'isActive',
+    required: false,
+    type: Boolean,
+    description: 'Filter by active status (true for active users, false for inactive)',
+    example: true
+  })
+  @ApiQuery({
+    name: 'verified',
+    required: false,
+    type: Boolean,
+    description: 'Filter by verification status (true for verified users, false for unverified)',
+    example: true
+  })
+  @ApiQuery({
+    name: 'name',
+    required: false,
+    type: String,
+    description: 'Filter by user name (case-insensitive partial match)',
+    example: 'John'
+  })
+  @ApiQuery({
+    name: 'email',
+    required: false,
+    type: String,
+    description: 'Filter by user email (case-insensitive partial match)',
+    example: 'user@example.com'
   })
   @ApiResponse({
     status: 200,
-    description: 'List of users retrieved successfully',
+    description: 'Users retrieved successfully',
     schema: {
       example: [
         {
@@ -116,8 +144,27 @@ export class UsersController {
       ],
     },
   })
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@Query() query: any) {
+    // Convert string boolean values to actual booleans
+    const filters: any = {};
+    
+    if (query.isActive !== undefined) {
+      filters.isActive = query.isActive === 'true';
+    }
+    
+    if (query.verified !== undefined) {
+      filters.verified = query.verified === 'true';
+    }
+    
+    if (query.name) {
+      filters.name = query.name;
+    }
+    
+    if (query.email) {
+      filters.email = query.email;
+    }
+
+    return this.usersService.findAll(Object.keys(filters).length > 0 ? filters : undefined);
   }
 
   @Get(':id')

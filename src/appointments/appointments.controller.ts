@@ -37,10 +37,12 @@ export class AppointmentsController {
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN, Role.DOCTOR)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Create a new appointment',
-    description: 'Schedule a new appointment with a doctor. Requires active subscription with available meetings.'
-  })  @ApiBody({
+    description:
+      'Schedule a new appointment with a doctor. Requires active subscription with available meetings.',
+  })
+  @ApiBody({
     type: CreateAppointmentDto,
     description: 'Appointment details',
     examples: {
@@ -50,12 +52,13 @@ export class AppointmentsController {
           userId: '507f1f77bcf86cd799439012',
           doctorId: '507f1f77bcf86cd799439011',
           date: '2025-01-15',
-          timeSlot: '14:30'
-        }
-      }
-    }
-  })  @ApiResponse({ 
-    status: 201, 
+          timeSlot: '14:30',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 201,
     description: 'Appointment created successfully',
     schema: {
       example: {
@@ -69,33 +72,42 @@ export class AppointmentsController {
           endTime: '2025-01-15T15:00:00.000Z',
           appointmentStatus: 'scheduled',
           createdAt: '2025-01-15T10:00:00.000Z',
-          updatedAt: '2025-01-15T10:00:00.000Z'
-        }
-      }
-    }
-  })  @ApiResponse({ 
-    status: 400, 
+          updatedAt: '2025-01-15T10:00:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
     description: 'Bad request - Invalid data or subscription issues',
     schema: {
       example: {
         success: false,
-        message: 'You need an active subscription to book appointments with doctors',
+        message:
+          'You need an active subscription to book appointments with doctors',
         error: 'SUBSCRIPTION_REQUIRED',
-        code: 'INSUFFICIENT_MEETINGS'
-      }
-    }
+        code: 'INSUFFICIENT_MEETINGS',
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   async create(@Body() createAppointmentDto: CreateAppointmentDto) {
     try {
-      const appointment = await this.appointmentsService.create(createAppointmentDto);
+      const appointment =
+        await this.appointmentsService.create(createAppointmentDto);
       return {
         success: true,
         message: 'Appointment scheduled successfully',
         data: appointment,
       };
     } catch (error) {
-      if (error.message.includes('subscription') || error.message.includes('meetings')) {
+      if (
+        error.message.includes('subscription') ||
+        error.message.includes('meetings')
+      ) {
         // Specific handling for subscription-related errors
         return {
           success: false,
@@ -118,68 +130,206 @@ export class AppointmentsController {
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ 
-    summary: 'Get all appointments (Admin only)',
-    description: 'Retrieve all appointments in the system. Only accessible by administrators.'
+  @ApiOperation({
+    summary: 'Get all appointments with optional filtering (Admin only)',
+    description:
+      'Retrieve all appointments in the system with optional filters for status, doctor/user names, dates, and more. Only accessible by administrators.',
   })
-  @ApiResponse({ 
-    status: 200, 
-    description: 'All appointments retrieved successfully',    schema: {
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Filter by appointment status',
+    enum: ['scheduled', 'completed', 'cancelled'],
+    example: 'scheduled',
+  })
+  @ApiQuery({
+    name: 'doctorName',
+    required: false,
+    description: 'Search by doctor name (partial match, case-insensitive)',
+    example: 'Dr. Smith',
+  })
+  @ApiQuery({
+    name: 'userName',
+    required: false,
+    description: 'Search by patient name (partial match, case-insensitive)',
+    example: 'John Doe',
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Global search in doctor and patient names/emails',
+    example: 'john',
+  })
+  @ApiQuery({
+    name: 'userId',
+    required: false,
+    description: 'Filter by specific user ID',
+    example: '507f1f77bcf86cd799439012',
+  })
+  @ApiQuery({
+    name: 'doctorId',
+    required: false,
+    description: 'Filter by specific doctor ID',
+    example: '507f1f77bcf86cd799439013',
+  })
+  @ApiQuery({
+    name: 'date',
+    required: false,
+    description: 'Filter by specific date (YYYY-MM-DD)',
+    example: '2025-01-15',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    description: 'Filter by date range - start date (YYYY-MM-DD)',
+    example: '2025-01-15',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    description: 'Filter by date range - end date (YYYY-MM-DD)',
+    example: '2025-01-20',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All appointments retrieved successfully',
+    schema: {
       example: {
         success: true,
         message: 'Appointments retrieved successfully',
-        data: [{
-          _id: '507f1f77bcf86cd799439011',
-          userId: '507f1f77bcf86cd799439012',
-          doctorId: '507f1f77bcf86cd799439013',
-          startTime: '2025-01-15T14:30:00.000Z',
-          endTime: '2025-01-15T15:00:00.000Z',
-          appointmentStatus: 'scheduled'
-        }]
-      }
-    }
+        data: [
+          {
+            _id: '507f1f77bcf86cd799439011',
+            userId: {
+              _id: '507f1f77bcf86cd799439012',
+              fullName: 'John Doe',
+              email: 'john@example.com',
+              phoneNumber: '+1234567890',
+              profilePicture: 'https://example.com/profile.jpg',
+            },
+            doctorId: {
+              _id: '507f1f77bcf86cd799439013',
+              fullName: 'Dr. Smith',
+              email: 'dr.smith@example.com',
+              phoneNumber: '+1234567891',
+              photoUrl: 'https://example.com/doctor.jpg',
+              specializations: ['Cardiology'],
+              experience: 10,
+            },
+            startTime: '2025-01-15T14:30:00.000Z',
+            endTime: '2025-01-15T15:00:00.000Z',
+            appointmentStatus: 'scheduled',
+            createdAt: '2025-01-15T10:00:00.000Z',
+            updatedAt: '2025-01-15T10:00:00.000Z',
+          },
+        ],
+        filters: {
+          status: 'scheduled',
+          doctorName: 'Smith',
+          userName: 'John',
+        },
+        total: 1,
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden - Admin role required' })
-  async findAll() {
-    const appointments = await this.appointmentsService.findAll();
+  async findAll(@Query() query: any) {
+    // Build filters object from query parameters
+    const filters: any = {};
+
+    if (query.status) {
+      filters.status = query.status;
+    }
+
+    if (query.doctorName) {
+      filters.doctorName = query.doctorName.trim();
+    }
+
+    if (query.userName) {
+      filters.userName = query.userName.trim();
+    }
+
+    if (query.search) {
+      filters.search = query.search.trim();
+    }
+
+    if (query.userId) {
+      filters.userId = query.userId;
+    }
+
+    if (query.doctorId) {
+      filters.doctorId = query.doctorId;
+    }
+
+    if (query.date) {
+      filters.date = query.date;
+    }
+
+    if (query.startDate) {
+      filters.startDate = query.startDate;
+    }
+
+    if (query.endDate) {
+      filters.endDate = query.endDate;
+    }
+
+    const appointments = await this.appointmentsService.findAll(
+      Object.keys(filters).length > 0 ? filters : undefined,
+    );
+
     return {
       success: true,
       message: 'Appointments retrieved successfully',
       data: appointments,
+      filters: Object.keys(filters).length > 0 ? filters : null,
+      total: appointments.length,
     };
   }
   @Get('user/:userId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.ADMIN)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get appointments by user ID',
-    description: 'Retrieve all appointments for a specific user. Users can only access their own appointments, admins can access any user appointments.'
+    description:
+      'Retrieve all appointments for a specific user. Users can only access their own appointments, admins can access any user appointments.',
   })
   @ApiParam({
     name: 'userId',
     description: 'The ID of the user whose appointments to retrieve',
-    example: '507f1f77bcf86cd799439012'
-  })  @ApiResponse({ 
-    status: 200, 
+    example: '507f1f77bcf86cd799439012',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'User appointments retrieved successfully',
     schema: {
       example: {
         success: true,
         message: 'User appointments retrieved successfully',
-        data: [{
-          _id: '507f1f77bcf86cd799439011',
-          userId: '507f1f77bcf86cd799439012',
-          doctorId: '507f1f77bcf86cd799439013',
-          startTime: '2025-01-15T14:30:00.000Z',
-          endTime: '2025-01-15T15:00:00.000Z',
-          appointmentStatus: 'scheduled'
-        }]
-      }
-    }
+        data: [
+          {
+            _id: '507f1f77bcf86cd799439011',
+            userId: '507f1f77bcf86cd799439012',
+            doctorId: '507f1f77bcf86cd799439013',
+            startTime: '2025-01-15T14:30:00.000Z',
+            endTime: '2025-01-15T15:00:00.000Z',
+            appointmentStatus: 'scheduled',
+          },
+        ],
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Insufficient permissions' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Insufficient permissions',
+  })
   async findByUser(@Param('userId') userId: string) {
     const appointments = await this.appointmentsService.findByUser(userId);
     return {
@@ -191,34 +341,44 @@ export class AppointmentsController {
   @Get('doctor/:doctorId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.DOCTOR, Role.ADMIN)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get appointments by doctor ID',
-    description: 'Retrieve all appointments for a specific doctor. Doctors can only access their own appointments, admins can access any doctor appointments.'
+    description:
+      'Retrieve all appointments for a specific doctor. Doctors can only access their own appointments, admins can access any doctor appointments.',
   })
   @ApiParam({
     name: 'doctorId',
     description: 'The ID of the doctor whose appointments to retrieve',
-    example: '507f1f77bcf86cd799439012'
-  })  @ApiResponse({ 
-    status: 200, 
+    example: '507f1f77bcf86cd799439012',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Doctor appointments retrieved successfully',
     schema: {
       example: {
         success: true,
         message: 'Doctor appointments retrieved successfully',
-        data: [{
-          _id: '507f1f77bcf86cd799439011',
-          userId: '507f1f77bcf86cd799439012',
-          doctorId: '507f1f77bcf86cd799439013',
-          startTime: '2025-01-15T14:30:00.000Z',
-          endTime: '2025-01-15T15:00:00.000Z',
-          appointmentStatus: 'scheduled'
-        }]
-      }
-    }
+        data: [
+          {
+            _id: '507f1f77bcf86cd799439011',
+            userId: '507f1f77bcf86cd799439012',
+            doctorId: '507f1f77bcf86cd799439013',
+            startTime: '2025-01-15T14:30:00.000Z',
+            endTime: '2025-01-15T15:00:00.000Z',
+            appointmentStatus: 'scheduled',
+          },
+        ],
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Insufficient permissions' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Insufficient permissions',
+  })
   async findByDoctor(@Param('doctorId') doctorId: string) {
     const appointments = await this.appointmentsService.findByDoctor(doctorId);
     return {
@@ -228,21 +388,23 @@ export class AppointmentsController {
     };
   }
   @Get('availability/:doctorId')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Check doctor availability',
-    description: 'Check if a doctor is available on a specific date for appointments.'
+    description:
+      'Check if a doctor is available on a specific date for appointments.',
   })
   @ApiParam({
     name: 'doctorId',
     description: 'The ID of the doctor to check availability for',
-    example: '507f1f77bcf86cd799439012'
+    example: '507f1f77bcf86cd799439012',
   })
   @ApiQuery({
     name: 'date',
     description: 'The date to check availability for (YYYY-MM-DD format)',
-    example: '2025-01-15'
-  })  @ApiResponse({ 
-    status: 200, 
+    example: '2025-01-15',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Doctor availability retrieved successfully',
     schema: {
       example: {
@@ -251,12 +413,15 @@ export class AppointmentsController {
         data: {
           available: true,
           timeSlots: ['09:00', '10:00', '14:00', '15:00'],
-          pastSlotsRemoved: 2
-        }
-      }
-    }
+          pastSlotsRemoved: 2,
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 400, description: 'Bad request - Invalid doctor ID or date format' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid doctor ID or date format',
+  })
   async checkAvailability(
     @Param('doctorId') doctorId: string,
     @Query('date') date: string,
@@ -273,16 +438,18 @@ export class AppointmentsController {
   }
   @Get(':id')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get appointment by ID',
-    description: 'Retrieve a specific appointment by its ID. Users can only access their own appointments unless they are admin/doctor.'
+    description:
+      'Retrieve a specific appointment by its ID. Users can only access their own appointments unless they are admin/doctor.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment to retrieve',
-    example: '507f1f77bcf86cd799439011'
-  })  @ApiResponse({ 
-    status: 200, 
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Appointment retrieved successfully',
     schema: {
       example: {
@@ -297,12 +464,15 @@ export class AppointmentsController {
           appointmentStatus: 'scheduled',
           callId: null,
           createdAt: '2025-01-15T10:00:00.000Z',
-          updatedAt: '2025-01-15T10:00:00.000Z'
-        }
-      }
-    }
+          updatedAt: '2025-01-15T10:00:00.000Z',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   @ApiResponse({ status: 404, description: 'Appointment not found' })
   async findOne(@Param('id') id: string) {
     const appointment = await this.appointmentsService.findOne(id);
@@ -315,15 +485,17 @@ export class AppointmentsController {
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DOCTOR, Role.ADMIN)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Update appointment',
-    description: 'Update appointment details. Users can update their own appointments, doctors can update appointments they are assigned to, admins can update any appointment.'
+    description:
+      'Update appointment details. Users can update their own appointments, doctors can update appointments they are assigned to, admins can update any appointment.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment to update',
-    example: '507f1f77bcf86cd799439011'
-  })  @ApiBody({
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiBody({
     type: UpdateAppointmentDto,
     description: 'Updated appointment details',
     examples: {
@@ -331,12 +503,13 @@ export class AppointmentsController {
         summary: 'Update appointment time',
         value: {
           date: '2025-01-16',
-          timeSlot: '16:00'
-        }
-      }
-    }
-  })  @ApiResponse({ 
-    status: 200, 
+          timeSlot: '16:00',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Appointment updated successfully',
     schema: {
       example: {
@@ -348,13 +521,19 @@ export class AppointmentsController {
           doctorId: '507f1f77bcf86cd799439013',
           startTime: '2025-01-16T16:00:00.000Z',
           endTime: '2025-01-16T16:30:00.000Z',
-          appointmentStatus: 'scheduled'
-        }
-      }
-    }
+          appointmentStatus: 'scheduled',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Insufficient permissions' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Insufficient permissions',
+  })
   @ApiResponse({ status: 404, description: 'Appointment not found' })
   async update(
     @Param('id') id: string,
@@ -373,16 +552,18 @@ export class AppointmentsController {
   @Patch(':id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.USER, Role.DOCTOR, Role.ADMIN)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Cancel appointment',
-    description: 'Cancel a scheduled appointment. Users can cancel their own appointments, doctors can cancel appointments assigned to them, admins can cancel any appointment.'
+    description:
+      'Cancel a scheduled appointment. Users can cancel their own appointments, doctors can cancel appointments assigned to them, admins can cancel any appointment.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment to cancel',
-    example: '507f1f77bcf86cd799439011'
-  })  @ApiResponse({ 
-    status: 200, 
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiResponse({
+    status: 200,
     description: 'Appointment cancelled successfully',
     schema: {
       example: {
@@ -394,13 +575,19 @@ export class AppointmentsController {
           doctorId: '507f1f77bcf86cd799439013',
           startTime: '2025-01-15T14:30:00.000Z',
           endTime: '2025-01-15T15:00:00.000Z',
-          appointmentStatus: 'cancelled'
-        }
-      }
-    }
+          appointmentStatus: 'cancelled',
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Insufficient permissions' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Insufficient permissions',
+  })
   @ApiResponse({ status: 404, description: 'Appointment not found' })
   async cancelAppointment(@Param('id') id: string) {
     const appointment = await this.appointmentsService.cancelAppointment(id);
@@ -410,32 +597,143 @@ export class AppointmentsController {
       data: appointment,
     };
   }
+
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.DOCTOR, Role.ADMIN)
+  @ApiOperation({
+    summary: 'Update appointment status',
+    description:
+      'Update the status of an appointment. Doctors can update status for their appointments, admins can update any appointment status.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'The ID of the appointment to update',
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiBody({
+    description: 'New appointment status',
+    schema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['scheduled', 'completed', 'cancelled'],
+          description: 'The new status for the appointment',
+          example: 'completed',
+        },
+      },
+      required: ['status'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Appointment status updated successfully',
+    schema: {
+      example: {
+        success: true,
+        message: 'Appointment status updated successfully',
+        data: {
+          _id: '507f1f77bcf86cd799439011',
+          userId: {
+            _id: '507f1f77bcf86cd799439012',
+            fullName: 'John Doe',
+            email: 'john@example.com',
+            phoneNumber: '+1234567890',
+            profilePicture: 'https://example.com/profile.jpg',
+          },
+          doctorId: {
+            _id: '507f1f77bcf86cd799439013',
+            fullName: 'Dr. Smith',
+            email: 'dr.smith@example.com',
+            phoneNumber: '+1234567891',
+            photoUrl: 'https://example.com/doctor.jpg',
+            specializations: ['Cardiology'],
+            experience: 10,
+          },
+          startTime: '2025-01-15T14:30:00.000Z',
+          endTime: '2025-01-15T15:00:00.000Z',
+          appointmentStatus: 'completed',
+          createdAt: '2025-01-15T10:00:00.000Z',
+          updatedAt: '2025-01-15T14:45:00.000Z',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid status or appointment ID',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Insufficient permissions',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Appointment not found',
+  })
+  async updateAppointmentStatus(
+    @Param('id') id: string,
+    @Body() body: { status: 'scheduled' | 'completed' | 'cancelled' },
+  ) {
+    const { status } = body;
+
+    // Validate status
+    const validStatuses = ['scheduled', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      throw new HttpException(
+        {
+          success: false,
+          message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const appointment = await this.appointmentsService.updateAppointmentStatus(
+      id,
+      status,
+    );
+    return {
+      success: true,
+      message: 'Appointment status updated successfully',
+      data: appointment,
+    };
+  }
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Delete appointment (Admin only)',
-    description: 'Permanently delete an appointment from the system. Only accessible by administrators.'
+    description:
+      'Permanently delete an appointment from the system. Only accessible by administrators.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment to delete',
-    example: '507f1f77bcf86cd799439011'
+    example: '507f1f77bcf86cd799439011',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'Appointment deleted successfully',
     schema: {
       example: {
         success: true,
         message: 'Appointment deleted successfully',
         data: {
-          deleted: true
-        }
-      }
-    }
+          deleted: true,
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   @ApiResponse({ status: 403, description: 'Forbidden - Admin role required' })
   @ApiResponse({ status: 404, description: 'Appointment not found' })
   async remove(@Param('id') id: string) {
@@ -451,12 +749,13 @@ export class AppointmentsController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Start video call for appointment',
-    description: 'Start a video call for an appointment. Can be initiated by either the patient or doctor.'
+    description:
+      'Start a video call for an appointment. Can be initiated by either the patient or doctor.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment to start the call for',
-    example: '507f1f77bcf86cd799439011'
+    example: '507f1f77bcf86cd799439011',
   })
   @ApiBody({
     description: 'Call configuration options',
@@ -467,21 +766,22 @@ export class AppointmentsController {
           type: 'string',
           enum: ['video', 'voice'],
           default: 'video',
-          description: 'Type of call to initiate'
-        }
-      }
+          description: 'Type of call to initiate',
+        },
+      },
     },
     examples: {
       videoCall: {
         summary: 'Start video call',
-        value: { callType: 'video' }
+        value: { callType: 'video' },
       },
       voiceCall: {
         summary: 'Start voice call',
-        value: { callType: 'voice' }
-      }
-    }
-  })  @ApiResponse({
+        value: { callType: 'voice' },
+      },
+    },
+  })
+  @ApiResponse({
     status: 200,
     description: 'Video call initiated successfully',
     schema: {
@@ -500,13 +800,16 @@ export class AppointmentsController {
             id: '507f1f77bcf86cd799439011',
             startTime: '2025-01-15T14:30:00.000Z',
             endTime: '2025-01-15T15:00:00.000Z',
-            status: 'scheduled'
-          }
-        }
-      }
-    }
+            status: 'scheduled',
+          },
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   @ApiResponse({ status: 404, description: 'Appointment not found' })
   async startVideoCallFromAppointment(
     @Param('id') appointmentId: string,
@@ -551,15 +854,17 @@ export class AppointmentsController {
   @Post(':id/join-call')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Join existing video call for appointment',
-    description: 'Join an existing video call for an appointment. The call must already be initiated by another participant.'
+    description:
+      'Join an existing video call for an appointment. The call must already be initiated by another participant.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment with an ongoing call to join',
-    example: '507f1f77bcf86cd799439011'
-  })  @ApiResponse({
+    example: '507f1f77bcf86cd799439011',
+  })
+  @ApiResponse({
     status: 200,
     description: 'Joined video call successfully',
     schema: {
@@ -578,14 +883,20 @@ export class AppointmentsController {
             id: '507f1f77bcf86cd799439011',
             startTime: '2025-01-15T14:30:00.000Z',
             endTime: '2025-01-15T15:00:00.000Z',
-            status: 'scheduled'
-          }
-        }
-      }
-    }
+            status: 'scheduled',
+          },
+        },
+      },
+    },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 404, description: 'Appointment or active call not found' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Appointment or active call not found',
+  })
   async joinVideoCall(@Param('id') appointmentId: string, @Request() req: any) {
     try {
       const userId = req.user.sub || req.user.id;
@@ -608,14 +919,15 @@ export class AppointmentsController {
   }
   @Post(':id/end-call')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'End video call for appointment',
-    description: 'End an ongoing video call for an appointment. Can be called by either participant.'
+    description:
+      'End an ongoing video call for an appointment. Can be called by either participant.',
   })
   @ApiParam({
     name: 'id',
     description: 'The ID of the appointment with an ongoing call to end',
-    example: '507f1f77bcf86cd799439011'
+    example: '507f1f77bcf86cd799439011',
   })
   @ApiResponse({
     status: 200,
@@ -643,8 +955,14 @@ export class AppointmentsController {
       },
     },
   })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 404, description: 'Appointment or active call not found' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Appointment or active call not found',
+  })
   async endVideoCall(
     @Param('id') appointmentId: string,
     @Request() req: { user: { sub?: string; id?: string } },
@@ -679,36 +997,39 @@ export class AppointmentsController {
   }
   @Get('check-subscription/:userId')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Check if user can book appointments',
-    description: 'Verify if a user has a valid subscription with available meeting slots to book appointments.'
+    description:
+      'Verify if a user has a valid subscription with available meeting slots to book appointments.',
   })
   @ApiParam({
     name: 'userId',
     description: 'The ID of the user to check subscription status for',
-    example: '507f1f77bcf86cd799439012'
+    example: '507f1f77bcf86cd799439012',
   })
-  @ApiResponse({ 
-    status: 200, 
+  @ApiResponse({
+    status: 200,
     description: 'User can book appointments',
     schema: {
       example: {
         success: true,
         message: 'User has a valid subscription with available meetings',
-        canBook: true
-      }
-    }
+        canBook: true,
+      },
+    },
   })
-  @ApiResponse({ 
-    status: 400, 
-    description: 'User cannot book appointments due to subscription issues',    schema: {
+  @ApiResponse({
+    status: 400,
+    description: 'User cannot book appointments due to subscription issues',
+    schema: {
       example: {
         success: false,
-        message: 'You need an active subscription to book appointments with doctors',
+        message:
+          'You need an active subscription to book appointments with doctors',
         canBook: false,
-        error: 'NO_SUBSCRIPTION'
-      }
-    }
+        error: 'NO_SUBSCRIPTION',
+      },
+    },
   })
   async checkSubscriptionForBooking(@Param('userId') userId: string) {
     try {
@@ -723,7 +1044,9 @@ export class AppointmentsController {
         success: false,
         message: error.message,
         canBook: false,
-        error: error.message.includes('meetings') ? 'INSUFFICIENT_MEETINGS' : 'NO_SUBSCRIPTION',
+        error: error.message.includes('meetings')
+          ? 'INSUFFICIENT_MEETINGS'
+          : 'NO_SUBSCRIPTION',
       };
     }
   }

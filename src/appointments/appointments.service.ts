@@ -212,19 +212,161 @@ export class AppointmentsService {
         `Failed to create appointment: ${error.message}`,
       );
     }
-  }  async findAll() {
-    return await this.appointmentModel
-      .find()
-      .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
-      .sort({ startTime: -1 }) // Sort by newest first
-      .exec();
+  }
+  async findAll(filters?: {
+    status?: string;
+    doctorName?: string;
+    userName?: string;
+    search?: string;
+    userId?: string;
+    doctorId?: string;
+    date?: string;
+    startDate?: string;
+    endDate?: string;
+  }) {
+    // If no filters, return all appointments with population
+    if (!filters || Object.keys(filters).length === 0) {
+      return await this.appointmentModel
+        .find()
+        .populate('userId', 'fullName email phoneNumber profilePicture')
+        .populate(
+          'doctorId',
+          'fullName email phoneNumber photoUrl specializations experience',
+        )
+        .sort({ startTime: -1 })
+        .exec();
+    }
+
+    // Use aggregation pipeline for advanced filtering with name search
+    const pipeline: any[] = [];
+
+    // Stage 1: Match basic filters
+    const matchStage: any = {};
+
+    if (filters.status) {
+      matchStage.appointmentStatus = filters.status;
+    }
+
+    if (filters.userId) {
+      matchStage.userId = new Types.ObjectId(filters.userId);
+    }
+
+    if (filters.doctorId) {
+      matchStage.doctorId = new Types.ObjectId(filters.doctorId);
+    }
+
+    // Date filtering
+    if (filters.date) {
+      const startOfDay = new Date(filters.date);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(filters.date);
+      endOfDay.setHours(23, 59, 59, 999);
+      matchStage.startTime = { $gte: startOfDay, $lte: endOfDay };
+    } else if (filters.startDate && filters.endDate) {
+      const start = new Date(filters.startDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(filters.endDate);
+      end.setHours(23, 59, 59, 999);
+      matchStage.startTime = { $gte: start, $lte: end };
+    }
+
+    if (Object.keys(matchStage).length > 0) {
+      pipeline.push({ $match: matchStage });
+    }
+
+    // Stage 2: Lookup user data
+    pipeline.push({
+      $lookup: {
+        from: 'users',
+        localField: 'userId',
+        foreignField: '_id',
+        as: 'userId',
+        pipeline: [
+          {
+            $project: {
+              fullName: 1,
+              email: 1,
+              phoneNumber: 1,
+              profilePicture: 1,
+            },
+          },
+        ],
+      },
+    });
+
+    // Stage 3: Lookup doctor data
+    pipeline.push({
+      $lookup: {
+        from: 'doctors',
+        localField: 'doctorId',
+        foreignField: '_id',
+        as: 'doctorId',
+        pipeline: [
+          {
+            $project: {
+              fullName: 1,
+              email: 1,
+              phoneNumber: 1,
+              photoUrl: 1,
+              specializations: 1,
+              experience: 1,
+            },
+          },
+        ],
+      },
+    });
+
+    // Stage 4: Unwind the populated arrays to make them objects
+    pipeline.push(
+      { $unwind: { path: '$userId', preserveNullAndEmptyArrays: true } },
+      { $unwind: { path: '$doctorId', preserveNullAndEmptyArrays: true } },
+    );
+
+    // Stage 5: Filter by names if specified
+    const nameMatchStage: any = {};
+
+    if (filters.doctorName) {
+      nameMatchStage['doctorId.fullName'] = {
+        $regex: filters.doctorName,
+        $options: 'i',
+      };
+    }
+
+    if (filters.userName) {
+      nameMatchStage['userId.fullName'] = {
+        $regex: filters.userName,
+        $options: 'i',
+      };
+    }
+
+    if (filters.search) {
+      nameMatchStage.$or = [
+        { 'doctorId.fullName': { $regex: filters.search, $options: 'i' } },
+        { 'userId.fullName': { $regex: filters.search, $options: 'i' } },
+        { 'doctorId.email': { $regex: filters.search, $options: 'i' } },
+        { 'userId.email': { $regex: filters.search, $options: 'i' } },
+      ];
+    }
+
+    if (Object.keys(nameMatchStage).length > 0) {
+      pipeline.push({ $match: nameMatchStage });
+    }
+
+    // Stage 6: Sort
+    pipeline.push({ $sort: { startTime: -1 } });
+
+    // Execute aggregation
+    const appointments = await this.appointmentModel.aggregate(pipeline).exec();
+    return appointments;
   }
   async findByUser(userId: string) {
     return await this.appointmentModel
       .find({ userId: new Types.ObjectId(userId) })
       .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .populate(
+        'doctorId',
+        'fullName email phoneNumber photoUrl specializations experience',
+      )
       .sort({ startTime: 1 })
       .exec();
   }
@@ -232,7 +374,10 @@ export class AppointmentsService {
     return await this.appointmentModel
       .find({ doctorId: new Types.ObjectId(doctorId) })
       .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .populate(
+        'doctorId',
+        'fullName email phoneNumber photoUrl specializations experience',
+      )
       .sort({ startTime: 1 })
       .exec();
   }
@@ -244,7 +389,10 @@ export class AppointmentsService {
     const appointment = await this.appointmentModel
       .findById(id)
       .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .populate(
+        'doctorId',
+        'fullName email phoneNumber photoUrl specializations experience',
+      )
       .exec();
 
     if (!appointment) {
@@ -276,7 +424,10 @@ export class AppointmentsService {
     const appointment = await this.appointmentModel
       .findByIdAndUpdate(id, updateAppointmentDto, { new: true })
       .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .populate(
+        'doctorId',
+        'fullName email phoneNumber photoUrl specializations experience',
+      )
       .exec();
 
     if (!appointment) {
@@ -299,7 +450,10 @@ export class AppointmentsService {
     const appointment = await this.appointmentModel
       .findByIdAndUpdate(id, { appointmentStatus: status }, { new: true })
       .populate('userId', 'fullName email phoneNumber profilePicture')
-      .populate('doctorId', 'fullName email phoneNumber photoUrl specializations experience')
+      .populate(
+        'doctorId',
+        'fullName email phoneNumber photoUrl specializations experience',
+      )
       .exec();
 
     if (!appointment) {
