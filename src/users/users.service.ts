@@ -77,6 +77,16 @@ export class UsersService {
     return user;
   }
 
+  async findByVerificationToken(token: string): Promise<UserDocument> {
+    const user = await this.userModel
+      .findOne({ verificationToken: token })
+      .exec();
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return user;
+  }
+
   async update(
     id: string,
     updateUserDto: UpdateUserDto,

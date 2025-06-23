@@ -23,6 +23,8 @@ import {
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { successResponse, errorResponse } from '../helper/response.helper';
 import { LoginUserDto } from '../users/dto/login-user.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -152,6 +154,77 @@ export class AuthController {
   ) {
     const result = await this.authService.register(createUserDto, response);
     return response.json(result);
+  }
+  @Post('verify-email')
+  @ApiOperation({
+    summary: 'Verify user email',
+    description:
+      'Verify user email address using a verification token sent via email.',
+  })
+  @ApiBody({
+    description: 'Email verification data',
+    type: VerifyEmailDto,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Email verified successfully',
+    schema: {
+      example: {
+        message: 'Email verified successfully',
+        data: {
+          verified: true,
+          user: {
+            id: '67741234567890abcdef5678',
+            email: 'user@example.com',
+            isVerified: true,
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired token',
+    schema: {
+      example: {
+        message: 'Invalid or expired verification token',
+        error: 'Bad Request',
+      },
+    },
+  })
+  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    try {
+      const result = await this.authService.verifyEmail(verifyEmailDto.token);
+      return successResponse(result, 'Email verified successfully');
+    } catch (error) {
+      return errorResponse(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  @Post('resend-verification')
+  @ApiOperation({
+    summary: 'Resend email verification',
+    description: 'Resend verification email to user',
+  })
+  @ApiBody({
+    description: 'User email to resend verification',
+    type: ResendVerificationDto,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification email sent successfully',
+  })
+  async resendVerification(
+    @Body() resendVerificationDto: ResendVerificationDto,
+  ) {
+    try {
+      await this.authService.resendVerificationEmail(
+        resendVerificationDto.email,
+      );
+      return successResponse(null, 'Verification email sent successfully');
+    } catch (error) {
+      return errorResponse(error.message, HttpStatus.BAD_REQUEST);
+    }
   }
 
   @Get('verify')

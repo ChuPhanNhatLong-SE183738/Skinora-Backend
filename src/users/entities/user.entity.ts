@@ -44,9 +44,13 @@ export class User {
 
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
-
   @Prop({ type: Date, default: Date.now })
   updatedAt: Date;
+  @Prop({ type: String, default: null })
+  verificationToken: string | null;
+
+  @Prop({ type: Date, default: null })
+  verificationTokenCreatedAt: Date | null;
 
   @Prop({ type: Types.ObjectId, ref: 'Subscription' })
   currentSubscription: Types.ObjectId;
