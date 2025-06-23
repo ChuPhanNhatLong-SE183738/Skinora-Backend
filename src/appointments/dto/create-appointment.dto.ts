@@ -22,4 +22,9 @@ export class CreateAppointmentDto {
   @IsNotEmpty()
   @IsString()
   timeSlot: string;
+
+  @ApiProperty({ description: 'Notes for the appointment', example: 'First consultation' })
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }

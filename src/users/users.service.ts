@@ -38,9 +38,46 @@ export class UsersService {
     const user = new this.userModel(createUser);
     return user.save();
   }
+  async findAll(filters?: {
+    isActive?: boolean;
+    name?: string;
+    email?: string;
+    verified?: boolean;
+  }): Promise<UserDocument[]> {
+    // Build the query object
+    const query: any = {};
 
-  async findAll(): Promise<UserDocument[]> {
-    return this.userModel.find().select('-password').exec();
+    // Filter by active status if provided
+    if (filters?.isActive !== undefined) {
+      query.isActive = filters.isActive;
+    }
+
+    // Filter by verified status if provided
+    if (filters?.verified !== undefined) {
+      query.isVerified = filters.verified;
+    }
+
+    // Filter by name (case-insensitive partial match)
+    if (filters?.name) {
+      query.fullName = {
+        $regex: filters.name,
+        $options: 'i', // case-insensitive
+      };
+    }
+
+    // Filter by email (case-insensitive partial match)
+    if (filters?.email) {
+      query.email = {
+        $regex: filters.email,
+        $options: 'i', // case-insensitive
+      };
+    }
+
+    return this.userModel
+      .find(query)
+      .select('-password') // Exclude password field
+      .sort({ createdAt: -1 }) // Sort by newest first
+      .exec();
   }
 
   async findOne(id: string): Promise<UserDocument> {
