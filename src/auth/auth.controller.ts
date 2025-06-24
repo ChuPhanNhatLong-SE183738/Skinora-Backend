@@ -25,6 +25,7 @@ import { successResponse, errorResponse } from '../helper/response.helper';
 import { LoginUserDto } from '../users/dto/login-user.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
+import { ForgotPasswordRequestDto, ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -318,6 +319,59 @@ export class AuthController {
   async getMyProfile(@Request() req) {
     const userId = req.user.sub || req.user.id;
     return this.authService.getMyProfile(userId);
+  }
+
+  // Forgot password - gửi email quên mật khẩu
+  @Post('forgot-password')
+  @ApiOperation({
+    summary: 'Gửi email quên mật khẩu',
+    description: 'Gửi email chứa link đặt lại mật khẩu cho người dùng',
+  })
+  @ApiBody({
+    description: 'Email người dùng',
+    type: ForgotPasswordRequestDto,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Đã gửi email đặt lại mật khẩu',
+    schema: { example: { message: 'Password reset email sent' } },
+  })
+  async forgotPassword(@Body() dto: ForgotPasswordRequestDto) {
+    try {
+      await this.authService.sendForgotPasswordEmail(dto.email);
+      return successResponse(null, 'Password reset email sent');
+    } catch (error) {
+      return errorResponse(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  // Forgot password - đặt lại mật khẩu mới
+  @Post('reset-password')
+  @ApiOperation({
+    summary: 'Reset user password',
+    description:
+      'Reset user password using a reset token sent via email. The new password must be provided.',
+  })
+  @ApiBody({
+    description: 'Reset password data',
+    type: ResetPasswordDto,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully',
+    schema: {
+      example: {
+        message: 'Password reset successfully',
+      },
+    },
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    try {
+      await this.authService.resetPassword(dto.token, dto.newPassword);
+      return successResponse(null, 'Password reset successfully');
+    } catch (error) {
+      return errorResponse(error.message, HttpStatus.BAD_REQUEST);
+    }
   }
 
   @Get('debug-token')

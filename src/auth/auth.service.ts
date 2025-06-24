@@ -12,6 +12,7 @@ import { UserDocument } from '../users/entities/user.entity';
 import { Types } from 'mongoose';
 import * as crypto from 'crypto';
 import { EmailService } from './email.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -338,5 +339,53 @@ export class AuthService {
     );
 
     return verificationToken;
+  }
+
+  async sendForgotPasswordEmail(email: string) {
+    const user = await this.usersService.findByEmail(email);
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    user.verificationToken = resetToken;
+    user.verificationTokenCreatedAt = new Date();
+    await user.save();
+
+    // Send reset password email
+    await this.emailService.sendForgotPasswordEmail(user.email, resetToken);
+
+    return { message: 'Reset password email sent successfully' };
+  }
+
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const user = await this.usersService.findByVerificationToken(token);
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    if (!user.verificationTokenCreatedAt) {
+      throw new Error('Verification token creation time is missing');
+    }
+    const tokenAge = Date.now() - user.verificationTokenCreatedAt.getTime();
+    if (tokenAge > 24 * 60 * 60 * 1000) {
+      // 24 hours in milliseconds
+      throw new BadRequestException('Reset token has expired');
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    // Update user's password
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.verificationToken = null;
+    user.verificationTokenCreatedAt = null;
+    await user.save();
+
+    return { message: 'Password reset successfully' };
   }
 }
