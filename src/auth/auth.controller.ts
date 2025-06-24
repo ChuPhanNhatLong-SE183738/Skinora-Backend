@@ -25,7 +25,10 @@ import { successResponse, errorResponse } from '../helper/response.helper';
 import { LoginUserDto } from '../users/dto/login-user.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { ResendVerificationDto } from './dto/resend-verification.dto';
-import { ForgotPasswordRequestDto, ResetPasswordDto } from './dto/reset-password.dto';
+import {
+  ForgotPasswordRequestDto,
+  ResetPasswordDto,
+} from './dto/reset-password.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -325,20 +328,31 @@ export class AuthController {
   @Post('forgot-password')
   @ApiOperation({
     summary: 'Gửi email quên mật khẩu',
-    description: 'Gửi email chứa link đặt lại mật khẩu cho người dùng',
+    description:
+      'Gửi email chứa link đặt lại mật khẩu cho người dùng (web) hoặc mã OTP (app)',
   })
   @ApiBody({
-    description: 'Email người dùng',
-    type: ForgotPasswordRequestDto,
+    description: 'Email người dùng và tuỳ chọn isMobile',
+    schema: {
+      example: {
+        email: 'user@example.com',
+        isMobile: true,
+      },
+      properties: {
+        email: { type: 'string' },
+        isMobile: { type: 'boolean', default: false },
+      },
+      required: ['email'],
+    },
   })
   @ApiResponse({
     status: 200,
-    description: 'Đã gửi email đặt lại mật khẩu',
+    description: 'Đã gửi email đặt lại mật khẩu hoặc OTP',
     schema: { example: { message: 'Password reset email sent' } },
   })
-  async forgotPassword(@Body() dto: ForgotPasswordRequestDto) {
+  async forgotPassword(@Body() dto: { email: string; isMobile?: boolean }) {
     try {
-      await this.authService.sendForgotPasswordEmail(dto.email);
+      await this.authService.sendForgotPasswordEmail(dto.email, dto.isMobile);
       return successResponse(null, 'Password reset email sent');
     } catch (error) {
       return errorResponse(error.message, HttpStatus.BAD_REQUEST);
@@ -368,6 +382,49 @@ export class AuthController {
   async resetPassword(@Body() dto: ResetPasswordDto) {
     try {
       await this.authService.resetPassword(dto.token, dto.newPassword);
+      return successResponse(null, 'Password reset successfully');
+    } catch (error) {
+      return errorResponse(error.message, HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  // Forgot password - xác thực OTP và đặt lại mật khẩu (cho app/mobile)
+  @Post('reset-password-otp')
+  @ApiOperation({
+    summary: 'Đặt lại mật khẩu bằng OTP',
+    description:
+      'Xác thực OTP gửi qua email và đặt lại mật khẩu mới (dùng cho app/mobile)',
+  })
+  @ApiBody({
+    description: 'Email, OTP và mật khẩu mới',
+    schema: {
+      example: {
+        email: 'user@example.com',
+        otp: '123456',
+        newPassword: 'newStrongPassword123',
+      },
+      properties: {
+        email: { type: 'string' },
+        otp: { type: 'string' },
+        newPassword: { type: 'string', minLength: 6 },
+      },
+      required: ['email', 'otp', 'newPassword'],
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully',
+    schema: { example: { message: 'Password reset successfully' } },
+  })
+  async resetPasswordOtp(
+    @Body() body: { email: string; otp: string; newPassword: string },
+  ) {
+    try {
+      await this.authService.resetPasswordWithOtp(
+        body.email,
+        body.otp,
+        body.newPassword,
+      );
       return successResponse(null, 'Password reset successfully');
     } catch (error) {
       return errorResponse(error.message, HttpStatus.BAD_REQUEST);

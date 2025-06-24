@@ -341,23 +341,32 @@ export class AuthService {
     return verificationToken;
   }
 
-  async sendForgotPasswordEmail(email: string) {
+  async sendForgotPasswordEmail(email: string, isMobile: boolean = false) {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    user.verificationToken = resetToken;
-    user.verificationTokenCreatedAt = new Date();
-    await user.save();
-
-    // Send reset password email
-    await this.emailService.sendForgotPasswordEmail(user.email, resetToken);
-
-    return { message: 'Reset password email sent successfully' };
+    if (isMobile) {
+      // Sinh OTP 6 số
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      user.otp = otp;
+      user.otpCreatedAt = new Date();
+      await user.save();
+      // Gửi OTP qua email
+      await this.emailService.sendForgotPasswordOtpEmail(user.email, otp);
+      return { message: 'OTP sent to email for password reset (mobile)', otp }; // Trả về otp để debug nếu cần
+    } else {
+      // Generate reset token (web)
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      user.verificationToken = resetToken;
+      user.verificationTokenCreatedAt = new Date();
+      await user.save();
+      // Send reset password email (web)
+      await this.emailService.sendForgotPasswordEmail(user.email, resetToken);
+      return { message: 'Reset password email sent successfully' };
+    }
   }
 
   async resetPassword(
@@ -386,6 +395,35 @@ export class AuthService {
     user.verificationTokenCreatedAt = null;
     await user.save();
 
+    return { message: 'Password reset successfully' };
+  }
+
+  async resetPasswordWithOtp(
+    email: string,
+    otp: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    if (!user.otp || !user.otpCreatedAt) {
+      throw new BadRequestException('OTP is invalid or expired');
+    }
+    // Kiểm tra OTP hết hạn (10 phút)
+    const otpAge = Date.now() - new Date(user.otpCreatedAt).getTime();
+    if (otpAge > 10 * 60 * 1000) {
+      throw new BadRequestException('OTP has expired');
+    }
+    if (user.otp !== otp) {
+      throw new BadRequestException('OTP is incorrect');
+    }
+    // Đặt lại mật khẩu
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.otp = null;
+    user.otpCreatedAt = null;
+    await user.save();
     return { message: 'Password reset successfully' };
   }
 }

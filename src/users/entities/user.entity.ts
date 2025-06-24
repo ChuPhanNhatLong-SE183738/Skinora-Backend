@@ -54,6 +54,12 @@ export class User {
 
   @Prop({ type: Types.ObjectId, ref: 'Subscription' })
   currentSubscription: Types.ObjectId;
+
+  @Prop({ type: String, default: null })
+  otp: string | null;
+
+  @Prop({ type: Date, default: null })
+  otpCreatedAt: Date | null;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

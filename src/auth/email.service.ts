@@ -203,6 +203,30 @@ export class EmailService {
     }
   }
 
+  async sendForgotPasswordOtpEmail(email: string, otp: string): Promise<void> {
+    const mailOptions = {
+      from: {
+        name: 'Skinora Healthcare',
+        address: this.configService.get('EMAIL_USERNAME'),
+      },
+      to: email,
+      subject: '🔑 Mã xác thực đặt lại mật khẩu (OTP) - Skinora Healthcare',
+      html: this.createForgotPasswordOtpEmailTemplate(otp),
+      text: `Mã OTP đặt lại mật khẩu của bạn là: ${otp}`,
+    };
+    try {
+      const info = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`✅ Forgot password OTP email sent to: ${email}`);
+      this.logger.log(`📧 Message ID: ${info.messageId}`);
+    } catch (error) {
+      this.logger.error(
+        '❌ Failed to send forgot password OTP email:',
+        error.message,
+      );
+      throw error;
+    }
+  }
+
   async saveEmailTemplatePreview(
     email: string,
     token: string,
@@ -451,6 +475,64 @@ export class EmailService {
                     <li>Link này chỉ có hiệu lực trong <strong>30 phút</strong></li>
                     <li>Nếu bạn không yêu cầu, hãy bỏ qua email này</li>
                     <li>Không chia sẻ link này với ai khác</li>
+                </ul>
+            </div>
+            <p style="text-align: center; color: #7F8C8D; font-style: italic; font-size: 16px; margin-top: 30px;">
+                Nếu bạn gặp khó khăn, hãy liên hệ với đội ngũ hỗ trợ của chúng tôi.
+            </p>
+        </div>
+        <div style="text-align: center; padding: 30px 20px; color: #95A5A6; font-size: 14px; background: #ECF0F1; border-radius: 0 0 15px 15px;">
+            <p style="margin: 0 0 8px 0;"><strong style="color: #27AE60;">Skinora Healthcare</strong> - Giải pháp chăm sóc da toàn diện</p>
+            <p style="margin: 0; font-size: 12px;">© 2025 Skinora Healthcare. All rights reserved.</p>
+            <div style="margin-top: 15px;">
+                <span style="margin: 0 10px; color: #27AE60;">📧</span>
+                <span style="margin: 0 10px; color: #27AE60;">📱</span>
+                <span style="margin: 0 10px; color: #27AE60;">🌐</span>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
+  }
+
+  private createForgotPasswordOtpEmailTemplate(otp: string): string {
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Mã OTP đặt lại mật khẩu - Skinora</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+        <div style="background: linear-gradient(135deg, #2ECC71 0%, #27AE60 100%); padding: 40px 30px; text-align: center; border-radius: 15px 15px 0 0; box-shadow: 0 4px 15px rgba(46, 204, 113, 0.3);">
+            <h1 style="color: white; margin: 0; font-size: 32px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">🏥 SKINORA</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 16px; font-weight: 500;">Healthcare & Skincare Solution</p>
+        </div>
+        <div style="background: white; padding: 50px 40px; border-radius: 0 0 15px 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.1);">
+            <div style="text-align: center; margin-bottom: 40px;">
+                <div style="background: linear-gradient(135deg, #2ECC71 0%, #27AE60 100%); width: 100px; height: 100px; border-radius: 50%; margin: 0 auto 25px; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);">
+                    <span style="font-size: 45px; line-height: 1;">🔑</span>
+                </div>
+                <h2 style="color: #27AE60; margin: 0; font-size: 24px; font-weight: bold;">Mã OTP đặt lại mật khẩu</h2>
+            </div>
+            <div style="text-align: center; margin-bottom: 30px;">
+                <p style="font-size: 18px; margin-bottom: 15px; color: #2C3E50;">Bạn vừa yêu cầu đặt lại mật khẩu cho tài khoản Skinora.</p>
+                <p style="font-size: 16px; margin-bottom: 0; color: #666;">Vui lòng nhập mã OTP bên dưới vào ứng dụng hoặc website để tiếp tục:</p>
+            </div>
+            <div style="text-align: center; margin: 40px 0;">
+                <div style="display: inline-block; padding: 18px 45px; background: linear-gradient(135deg, #2ECC71 0%, #27AE60 100%); color: white; border-radius: 50px; font-weight: bold; font-size: 32px; letter-spacing: 8px; box-shadow: 0 6px 20px rgba(46, 204, 113, 0.4);">
+                  ${otp}
+                </div>
+            </div>
+            <div style="background: linear-gradient(135deg, #E8F8F5 0%, #D5F4E6 100%); border-left: 5px solid #27AE60; padding: 25px; margin: 40px 0; border-radius: 8px;">
+                <h3 style="color: #27AE60; margin: 0 0 15px 0; font-size: 18px; display: flex; align-items: center;">
+                    <span style="margin-right: 10px;">🛡️</span>Lưu ý bảo mật
+                </h3>
+                <ul style="margin: 0; padding-left: 25px; color: #2C3E50; line-height: 1.8;">
+                    <li>Mã OTP chỉ có hiệu lực trong <strong>10 phút</strong></li>
+                    <li>Không chia sẻ mã này với bất kỳ ai</li>
+                    <li>Nếu bạn không yêu cầu, hãy bỏ qua email này</li>
                 </ul>
             </div>
             <p style="text-align: center; color: #7F8C8D; font-style: italic; font-size: 16px; margin-top: 30px;">
