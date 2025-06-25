@@ -324,7 +324,6 @@ export class AuthController {
     return this.authService.getMyProfile(userId);
   }
 
-  // Forgot password - gửi email quên mật khẩu
   @Post('forgot-password')
   @ApiOperation({
     summary: 'Gửi email quên mật khẩu',
@@ -359,7 +358,6 @@ export class AuthController {
     }
   }
 
-  // Forgot password - đặt lại mật khẩu mới
   @Post('reset-password')
   @ApiOperation({
     summary: 'Reset user password',
@@ -388,7 +386,7 @@ export class AuthController {
     }
   }
 
-  // Forgot password - xác thực OTP và đặt lại mật khẩu (cho app/mobile)
+  // OTP cho mobile app
   @Post('reset-password-otp')
   @ApiOperation({
     summary: 'Đặt lại mật khẩu bằng OTP',
