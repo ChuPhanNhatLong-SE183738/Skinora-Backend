@@ -62,7 +62,22 @@ export class PaymentService {
         throw new BadRequestException('Subscription is not pending payment');
       }
 
-      // Tạo payment record (chưa có link thanh toán, chỉ lưu trạng thái chờ)
+      // Sinh mã đơn hàng duy nhất (orderCode) với tiền tố ORD và 3-6 ký tự số
+      let orderCode = '';
+      let isUnique = false;
+      while (!isUnique) {
+        const randomLength = Math.floor(Math.random() * 4) + 3; // 3-6 ký tự
+        const randomNumber = Math.floor(
+          Math.random() * Math.pow(10, randomLength),
+        )
+          .toString()
+          .padStart(randomLength, '0');
+        orderCode = `ORD${randomNumber}`;
+        // Kiểm tra trùng lặp trong DB
+        const existing = await this.paymentModel.findOne({ orderCode });
+        if (!existing) isUnique = true;
+      }
+      // Tạo payment record
       const payment = new this.paymentModel({
         userId,
         subscriptionId: (subscription as any)._id,
@@ -73,18 +88,20 @@ export class PaymentService {
         description:
           createPaymentDto.description ||
           `Payment for ${subscription.planName}`,
+        orderCode: orderCode || '', // Đảm bảo orderCode luôn có giá trị
       });
-
       const savedPayment = await payment.save();
-
-      // Trả về thông tin để user chuyển khoản (SePay không tạo link thanh toán như PayOS)
-      // Có thể trả về thông tin tài khoản nhận, nội dung chuyển khoản, v.v. nếu cần
+      // Trả về thông tin tài khoản nhận, nội dung chuyển khoản cho FE
       return {
         paymentId: savedPayment._id,
         amount: subscription.totalAmount,
         description: savedPayment.description,
         subscriptionId: (subscription as any)._id,
-        // Có thể bổ sung thêm thông tin tài khoản nhận tiền ở đây nếu cần
+        orderCode: savedPayment.orderCode,
+        bankAccount: '0123456789', // Thay bằng số tài khoản nhận thật
+        bankName: 'Vietcombank', // Thay bằng tên ngân hàng thật
+        accountName: 'CONG TY ABC', // Thay bằng tên chủ tài khoản thật
+        transferContent: savedPayment.orderCode, // FE sẽ hiển thị nội dung này cho user copy khi chuyển khoản
       };
     } catch (error) {
       throw new BadRequestException(
@@ -93,15 +110,14 @@ export class PaymentService {
     }
   }
 
-  // Xử lý webhook từ SePay
+  // Mapping nâng cao khi nhận webhook từ SePay
+  // Tìm payment dựa trên orderCode (nội dung chuyển khoản), số tiền, trạng thái pending
   async handleSepayWebhook(webhookData: any, authHeader: string) {
     try {
-      // Kiểm tra API Key nếu cấu hình dùng API Key
       const sepayApiKey = this.configService.get('SEPAY_API_KEY');
       if (sepayApiKey && authHeader !== `Apikey ${sepayApiKey}`) {
         throw new UnauthorizedException('Invalid API Key');
       }
-
       // Chống trùng lặp giao dịch dựa trên id của SePay
       const existing = await this.paymentModel.findOne({
         sepayId: webhookData.id,
@@ -109,20 +125,15 @@ export class PaymentService {
       if (existing) {
         return { success: true, message: 'Already processed' };
       }
-
-      // Tìm payment theo subscriptionId hoặc thông tin khác nếu có
-      // (Có thể cần mapping giữa payment và giao dịch SePay dựa trên nội dung chuyển khoản hoặc referenceCode)
-      // Ở đây giả sử bạn đã lưu mapping ở chỗ khác, hoặc sẽ cập nhật payment đầu tiên có trạng thái pending
+      // Mapping nâng cao: tìm payment theo orderCode (nội dung chuyển khoản), số tiền, trạng thái pending
       const payment = await this.paymentModel.findOne({
-        subscriptionId: webhookData.subscriptionId, // Cần đảm bảo có trường này hoặc mapping phù hợp
+        orderCode: webhookData.content, // content là nội dung chuyển khoản user nhập
+        amount: webhookData.transferAmount,
         status: 'pending',
       });
-
       if (!payment) {
         throw new NotFoundException('Payment not found for webhook');
       }
-
-      // Cập nhật payment với thông tin từ SePay
       payment.status =
         webhookData.transferType === 'in' ? 'completed' : 'pending';
       payment.paidAt =
@@ -133,15 +144,12 @@ export class PaymentService {
       payment['sepayReferenceCode'] = webhookData.referenceCode;
       payment['sepayWebhook'] = webhookData;
       await payment.save();
-
-      // Kích hoạt subscription nếu thanh toán thành công
       if (webhookData.transferType === 'in') {
         await this.subscriptionService.activateSubscription(
           payment.subscriptionId.toString(),
           (payment._id as any).toString(),
         );
       }
-
       return { success: true };
     } catch (error) {
       throw new BadRequestException(
