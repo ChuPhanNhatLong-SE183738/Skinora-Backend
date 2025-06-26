@@ -12,11 +12,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { RedisService } from './redis.service';
 
-@Injectable()
 @WebSocketGateway({
   cors: {
     origin: '*',
-    credentials: true,
+    credentials: false,
   },
   namespace: '/',
 })
