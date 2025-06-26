@@ -2,31 +2,23 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
-const PayOS = require('@payos/node');
 import { Payment, PaymentDocument } from './entities/payment.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { SubscriptionService } from '../subscription/subscription.service';
 
 @Injectable()
 export class PaymentService {
-  private payOS: any;
-
   constructor(
     @InjectModel(Payment.name)
     private paymentModel: Model<PaymentDocument>,
     private subscriptionService: SubscriptionService,
     private configService: ConfigService,
-  ) {
-    this.payOS = new PayOS(
-      this.configService.get('PAYOS_CLIENT_ID') || '',
-      this.configService.get('PAYOS_API_KEY') || '',
-      this.configService.get('PAYOS_CHECKSUM_KEY') || '',
-    );
-  }
+  ) {}
 
   async createPayment(userId: string, createPaymentDto: CreatePaymentDto) {
     try {
@@ -70,14 +62,14 @@ export class PaymentService {
         throw new BadRequestException('Subscription is not pending payment');
       }
 
-      // Create payment record
+      // Tạo payment record (chưa có link thanh toán, chỉ lưu trạng thái chờ)
       const payment = new this.paymentModel({
         userId,
         subscriptionId: (subscription as any)._id,
         amount: subscription.totalAmount,
         currency: 'VND',
         status: 'pending',
-        paymentMethod: 'payos',
+        paymentMethod: 'sepay',
         description:
           createPaymentDto.description ||
           `Payment for ${subscription.planName}`,
@@ -85,37 +77,14 @@ export class PaymentService {
 
       const savedPayment = await payment.save();
 
-      // Create PayOS payment link
-      const orderCode = Date.now();
-      const payosData = {
-        orderCode: orderCode,
-        amount: subscription.totalAmount,
-        description: savedPayment.description,
-        returnUrl: `${this.configService.get('PAYOS_RETURN_URL')}?orderCode=${orderCode}&subscriptionId=${(subscription as any)._id}`,
-        cancelUrl: `${this.configService.get('PAYOS_CANCEL_URL')}?orderCode=${orderCode}`,
-        items: [
-          {
-            name: subscription.planName,
-            quantity: 1,
-            price: subscription.totalAmount,
-          },
-        ],
-      };
-
-      const paymentLinkResponse = await this.payOS.createPaymentLink(payosData);
-
-      // Update payment with PayOS order code
-      savedPayment.payosOrderCode = orderCode.toString();
-      savedPayment.payosResponse = paymentLinkResponse;
-      await savedPayment.save();
-
+      // Trả về thông tin để user chuyển khoản (SePay không tạo link thanh toán như PayOS)
+      // Có thể trả về thông tin tài khoản nhận, nội dung chuyển khoản, v.v. nếu cần
       return {
         paymentId: savedPayment._id,
-        paymentUrl: paymentLinkResponse.checkoutUrl,
-        orderCode: orderCode,
         amount: subscription.totalAmount,
         description: savedPayment.description,
         subscriptionId: (subscription as any)._id,
+        // Có thể bổ sung thêm thông tin tài khoản nhận tiền ở đây nếu cần
       };
     } catch (error) {
       throw new BadRequestException(
@@ -124,140 +93,59 @@ export class PaymentService {
     }
   }
 
-  async handlePayOSWebhook(webhookData: any) {
+  // Xử lý webhook từ SePay
+  async handleSepayWebhook(webhookData: any, authHeader: string) {
     try {
-      console.log('🔔 === PAYOS WEBHOOK RECEIVED ===');
-      console.log('📋 Raw webhook data:', JSON.stringify(webhookData, null, 2));
-      console.log('📊 Webhook data type:', typeof webhookData);
-      console.log('🔍 Webhook keys:', Object.keys(webhookData));
+      // Kiểm tra API Key nếu cấu hình dùng API Key
+      const sepayApiKey = this.configService.get('SEPAY_API_KEY');
+      if (sepayApiKey && authHeader !== `Apikey ${sepayApiKey}`) {
+        throw new UnauthorizedException('Invalid API Key');
+      }
 
-      const { orderCode, code, desc, data } = webhookData;
+      // Chống trùng lặp giao dịch dựa trên id của SePay
+      const existing = await this.paymentModel.findOne({
+        sepayId: webhookData.id,
+      });
+      if (existing) {
+        return { success: true, message: 'Already processed' };
+      }
 
-      console.log('📦 Extracted values:');
-      console.log('  - orderCode:', orderCode, '(type:', typeof orderCode, ')');
-      console.log('  - code:', code, '(type:', typeof code, ')');
-      console.log('  - desc:', desc);
-      console.log('  - data:', data);
-
-      // Find payment by order code
+      // Tìm payment theo subscriptionId hoặc thông tin khác nếu có
+      // (Có thể cần mapping giữa payment và giao dịch SePay dựa trên nội dung chuyển khoản hoặc referenceCode)
+      // Ở đây giả sử bạn đã lưu mapping ở chỗ khác, hoặc sẽ cập nhật payment đầu tiên có trạng thái pending
       const payment = await this.paymentModel.findOne({
-        payosOrderCode: orderCode.toString(),
+        subscriptionId: webhookData.subscriptionId, // Cần đảm bảo có trường này hoặc mapping phù hợp
+        status: 'pending',
       });
 
-      console.log('💳 Payment found in DB:', payment ? 'YES' : 'NO');
-      if (payment) {
-        console.log('💳 Payment details:', {
-          id: payment._id,
-          status: payment.status,
-          amount: payment.amount,
-          orderCode: payment.payosOrderCode,
-        });
-      }
-
       if (!payment) {
-        console.error('❌ Payment not found for orderCode:', orderCode);
-        throw new NotFoundException('Payment not found');
+        throw new NotFoundException('Payment not found for webhook');
       }
 
-      if (code === '00') {
-        console.log('✅ Payment successful - code === "00"');
-        // Payment successful - use 'completed' status
-        payment.status = 'completed';
-        payment.payosTransactionId =
-          data?.transactionDateTime || Date.now().toString();
-        payment.paidAt = new Date();
+      // Cập nhật payment với thông tin từ SePay
+      payment.status =
+        webhookData.transferType === 'in' ? 'completed' : 'pending';
+      payment.paidAt =
+        webhookData.transferType === 'in'
+          ? new Date(webhookData.transactionDate)
+          : null;
+      payment['sepayId'] = webhookData.id;
+      payment['sepayReferenceCode'] = webhookData.referenceCode;
+      payment['sepayWebhook'] = webhookData;
+      await payment.save();
 
-        // Update payosResponse with new status and webhook data
-        payment.payosResponse = {
-          ...payment.payosResponse,
-          status: 'PAID', // Update the status in payosResponse
-          webhook: webhookData,
-          updatedAt: new Date().toISOString(),
-        };
-
-        const savedPayment = await payment.save();
-        console.log('💾 Payment updated successfully:', savedPayment._id);
-
-        // Activate subscription
-        console.log('🔄 Activating subscription...');
+      // Kích hoạt subscription nếu thanh toán thành công
+      if (webhookData.transferType === 'in') {
         await this.subscriptionService.activateSubscription(
           payment.subscriptionId.toString(),
-          (payment as any)._id.toString(),
+          (payment._id as any).toString(),
         );
-        console.log('✅ Subscription activated successfully');
-
-        return { success: true, message: 'Payment processed successfully' };
-      } else {
-        console.log('❌ Payment failed - code:', code);
-        // Payment failed
-        payment.status = 'failed';
-        payment.payosResponse = {
-          ...payment.payosResponse,
-          status: 'FAILED', // Update status in payosResponse
-          webhook: webhookData,
-          updatedAt: new Date().toISOString(),
-        };
-        await payment.save();
-        console.log('💾 Payment marked as failed');
-
-        return { success: false, message: 'Payment failed' };
       }
+
+      return { success: true };
     } catch (error) {
-      console.error('🚨 Webhook processing error:', error);
-      console.error('🚨 Error stack:', error.stack);
       throw new BadRequestException(
         `Webhook processing failed: ${error.message}`,
-      );
-    }
-  }
-
-  async handlePayOSReturn(orderCode: string) {
-    try {
-      // Get payment info from PayOS
-      const paymentInfo = await this.payOS.getPaymentLinkInformation(
-        parseInt(orderCode),
-      );
-
-      const payment = await this.paymentModel.findOne({
-        payosOrderCode: orderCode,
-      });
-
-      if (!payment) {
-        throw new NotFoundException('Payment not found');
-      }
-
-      if (paymentInfo.status === 'PAID') {
-        payment.status = 'completed'; // Use 'completed' instead of 'PAID'
-        payment.paidAt = new Date();
-        payment.payosResponse = {
-          ...payment.payosResponse,
-          status: 'PAID', // Update status in payosResponse
-          return: paymentInfo,
-          updatedAt: new Date().toISOString(),
-        };
-        await payment.save();
-
-        // Activate subscription
-        await this.subscriptionService.activateSubscription(
-          payment.subscriptionId.toString(),
-          (payment as any)._id.toString(),
-        );
-
-        return {
-          success: true,
-          message: 'Payment completed successfully',
-          subscriptionId: payment.subscriptionId,
-        };
-      } else {
-        return {
-          success: false,
-          message: 'Payment not completed',
-          status: paymentInfo.status,
-        };
-      }
-    } catch (error) {
-      throw new BadRequestException(
-        `Return processing failed: ${error.message}`,
       );
     }
   }
@@ -279,7 +167,7 @@ export class PaymentService {
     console.log('🔍 Debug: Querying payment with orderCode:', orderCode);
 
     const payment = await this.paymentModel
-      .findOne({ payosOrderCode: orderCode })
+      .findOne({ sepayId: orderCode })
       .lean() // Get raw object without Mongoose transformations
       .exec();
 
@@ -289,7 +177,7 @@ export class PaymentService {
       // Check all payments to see what's available
       const allPayments = await this.paymentModel
         .find({})
-        .select('payosOrderCode status amount')
+        .select('sepayId status amount')
         .lean()
         .exec();
 
@@ -304,7 +192,7 @@ export class PaymentService {
     console.log('🔍 Getting payment for orderCode:', orderCode);
 
     const payment = await this.paymentModel
-      .findOne({ payosOrderCode: orderCode })
+      .findOne({ sepayId: orderCode })
       .populate('subscriptionId')
       .populate('userId', 'fullName email')
       .exec();
@@ -322,7 +210,7 @@ export class PaymentService {
       description: payment.description,
       subscription: payment.subscriptionId,
       paidAt: payment.paidAt,
-      orderCode: payment.payosOrderCode,
+      orderCode: payment.sepayId,
       rawStatus: payment.status, // Add raw status for debugging
     };
 
@@ -348,155 +236,5 @@ export class PaymentService {
       paymentId: payment ? payment._id : null,
       isActive: subscription.status === 'active',
     };
-  }
-
-  async verifyPaymentManually(orderCode: string) {
-    try {
-      console.log('=== MANUAL VERIFICATION START ===');
-      console.log('OrderCode:', orderCode);
-
-      // First check if payment exists in DB
-      const existingPayment = await this.paymentModel.findOne({
-        payosOrderCode: orderCode,
-      });
-
-      console.log('Existing payment in DB:', existingPayment);
-
-      if (!existingPayment) {
-        throw new NotFoundException('Payment not found in database');
-      }
-
-      // Get real payment info from PayOS
-      const paymentInfo = await this.payOS.getPaymentLinkInformation(
-        parseInt(orderCode),
-      );
-
-      console.log('PayOS payment info:', JSON.stringify(paymentInfo, null, 2));
-      console.log('Current payment status in DB:', existingPayment.status);
-      console.log('PayOS payment status:', paymentInfo.status);
-
-      // If PayOS shows payment as completed, use real webhook data
-      if (paymentInfo.status === 'PAID') {
-        console.log(
-          '🔄 Payment is PAID on PayOS, processing with real data...',
-        );
-
-        // Check if there's actual transaction data in PayOS response
-        if (paymentInfo.transactions && paymentInfo.transactions.length > 0) {
-          console.log('📋 Found real transaction data');
-
-          // Use real transaction data from PayOS
-          const transaction = paymentInfo.transactions[0];
-          const realWebhookData = {
-            orderCode: parseInt(orderCode),
-            code: '00', // Success code
-            desc: 'success',
-            data: {
-              orderCode: parseInt(orderCode),
-              amount: paymentInfo.amount,
-              description: paymentInfo.description,
-              accountNumber: paymentInfo.accountNumber,
-              reference: transaction.reference || paymentInfo.reference,
-              transactionDateTime:
-                transaction.transactionDateTime ||
-                paymentInfo.transactionDateTime,
-              currency: paymentInfo.currency,
-              paymentLinkId: paymentInfo.paymentLinkId,
-              code: '00',
-              desc: 'success',
-              counterAccountBankId: transaction.counterAccountBankId,
-              counterAccountBankName: transaction.counterAccountBankName,
-              counterAccountName: transaction.counterAccountName,
-              counterAccountNumber: transaction.counterAccountNumber,
-              virtualAccountName:
-                transaction.virtualAccountName ||
-                paymentInfo.virtualAccountName,
-              virtualAccountNumber:
-                transaction.virtualAccountNumber ||
-                paymentInfo.virtualAccountNumber,
-            },
-          };
-
-          console.log(
-            '📋 Real webhook data from PayOS:',
-            JSON.stringify(realWebhookData, null, 2),
-          );
-
-          // Process the real webhook
-          const webhookResult = await this.handlePayOSWebhook(realWebhookData);
-
-          console.log('✅ Real webhook processing result:', webhookResult);
-
-          if (webhookResult.success) {
-            return {
-              success: true,
-              message:
-                'Payment verified and activated successfully with real PayOS data',
-              paymentStatus: 'completed',
-              subscriptionId: existingPayment.subscriptionId,
-              webhookProcessed: true,
-              realData: true,
-            };
-          } else {
-            throw new Error('Real webhook processing failed');
-          }
-        } else {
-          // No transaction data yet, but PayOS shows PAID - use basic info
-          console.log('⚠️ PayOS shows PAID but no transaction details yet');
-
-          const basicWebhookData = {
-            orderCode: parseInt(orderCode),
-            code: '00',
-            desc: 'success',
-            data: {
-              orderCode: parseInt(orderCode),
-              amount: paymentInfo.amount,
-              description: paymentInfo.description,
-              transactionDateTime: new Date().toISOString(),
-              currency: paymentInfo.currency || 'VND',
-              paymentLinkId: paymentInfo.paymentLinkId,
-              code: '00',
-              desc: 'success',
-            },
-          };
-
-          console.log(
-            '📋 Basic webhook data (no transaction details):',
-            JSON.stringify(basicWebhookData, null, 2),
-          );
-
-          const webhookResult = await this.handlePayOSWebhook(basicWebhookData);
-
-          if (webhookResult.success) {
-            return {
-              success: true,
-              message:
-                'Payment verified and activated successfully (basic PayOS data)',
-              paymentStatus: 'completed',
-              subscriptionId: existingPayment.subscriptionId,
-              webhookProcessed: true,
-              realData: true,
-              note: 'Transaction details not available yet from PayOS',
-            };
-          } else {
-            throw new Error('Webhook processing failed');
-          }
-        }
-      } else {
-        // PayOS status is not PAID yet
-        return {
-          success: false,
-          message: `Payment not completed on PayOS. Current status: ${paymentInfo.status}`,
-          paymentStatus: paymentInfo.status,
-          dbStatus: existingPayment.status,
-          payosData: paymentInfo,
-        };
-      }
-    } catch (error) {
-      console.error('Manual verification error:', error);
-      throw new BadRequestException(
-        `Manual verification failed: ${error.message}`,
-      );
-    }
   }
 }

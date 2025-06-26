@@ -30,16 +30,16 @@ export class Payment {
   description: string;
 
   @Prop()
-  payosOrderCode: string;
+  sepayId: string;
 
   @Prop()
-  payosTransactionId: string;
+  sepayReferenceCode: string;
 
   @Prop({ type: Object })
-  payosResponse: any;
+  sepayWebhook: any;
 
-  @Prop()
-  paidAt: Date;
+  @Prop({ type: Date, default: null })
+  paidAt: Date | null;
 }
 
 export const PaymentSchema = SchemaFactory.createForClass(Payment);

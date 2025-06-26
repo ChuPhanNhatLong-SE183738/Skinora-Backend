@@ -48,64 +48,63 @@ export class PaymentController {
     }
   }
 
-  @Post('payos/webhook')
-  @ApiOperation({ summary: 'PayOS webhook endpoint' })
-  async handlePayOSWebhook(@Body() webhookData: any) {
+  @Post('sepay/webhook')
+  @ApiOperation({ summary: 'SePay webhook endpoint' })
+  async handleSepayWebhook(@Body() webhookData: any, @Request() req) {
     try {
-      console.log('📞 Webhook endpoint called');
-      console.log('📨 Request body:', JSON.stringify(webhookData, null, 2));
-
-      const result = await this.paymentService.handlePayOSWebhook(webhookData);
-
-      console.log('📤 Webhook response:', result);
+      const authHeader =
+        req.headers['authorization'] || req.headers['Authorization'] || '';
+      const result = await this.paymentService.handleSepayWebhook(
+        webhookData,
+        authHeader,
+      );
       return successResponse(result, 'Webhook processed successfully');
     } catch (error) {
-      console.error('🚨 Webhook controller error:', error.message);
       return errorResponse(error.message);
     }
   }
 
-  @Get('payos/return')
-  @ApiOperation({ summary: 'PayOS return URL endpoint' })
-  async handlePayOSReturn(@Query('orderCode') orderCode: string) {
-    try {
-      console.log('🔙 Return URL called with orderCode:', orderCode);
-      const result = await this.paymentService.handlePayOSReturn(orderCode);
-      console.log('📤 Return response:', result);
-      return successResponse(result, 'Payment return processed');
-    } catch (error) {
-      console.error('🚨 Return URL error:', error.message);
-      return errorResponse(error.message);
-    }
-  }
+  // @Get('payos/return')
+  // @ApiOperation({ summary: 'PayOS return URL endpoint' })
+  // async handlePayOSReturn(@Query('orderCode') orderCode: string) {
+  //   try {
+  //     console.log('🔙 Return URL called with orderCode:', orderCode);
+  //     const result = await this.paymentService.handlePayOSReturn(orderCode);
+  //     console.log('📤 Return response:', result);
+  //     return successResponse(result, 'Payment return processed');
+  //   } catch (error) {
+  //     console.error('🚨 Return URL error:', error.message);
+  //     return errorResponse(error.message);
+  //   }
+  // }
 
-  @Post('verify/:orderCode')
-  @ApiOperation({
-    summary: 'Manually verify payment status with PayOS and process webhook',
-    description:
-      'Checks PayOS payment status and processes webhook if payment is completed',
-  })
-  async verifyPaymentManually(@Param('orderCode') orderCode: string) {
-    try {
-      console.log('🔍 Manual verification requested for orderCode:', orderCode);
-      const result = await this.paymentService.verifyPaymentManually(orderCode);
+  // @Post('verify/:orderCode')
+  // @ApiOperation({
+  //   summary: 'Manually verify payment status with PayOS and process webhook',
+  //   description:
+  //     'Checks PayOS payment status and processes webhook if payment is completed',
+  // })
+  // async verifyPaymentManually(@Param('orderCode') orderCode: string) {
+  //   try {
+  //     console.log('🔍 Manual verification requested for orderCode:', orderCode);
+  //     const result = await this.paymentService.verifyPaymentManually(orderCode);
 
-      if (result.success) {
-        return successResponse(
-          result,
-          'Payment verification and webhook processing completed successfully',
-        );
-      } else {
-        return successResponse(
-          result,
-          'Payment verification completed - no action needed',
-        );
-      }
-    } catch (error) {
-      console.error('🚨 Manual verification error:', error.message);
-      return errorResponse(error.message);
-    }
-  }
+  //     if (result.success) {
+  //       return successResponse(
+  //         result,
+  //         'Payment verification and webhook processing completed successfully',
+  //       );
+  //     } else {
+  //       return successResponse(
+  //         result,
+  //         'Payment verification completed - no action needed',
+  //       );
+  //     }
+  //   } catch (error) {
+  //     console.error('🚨 Manual verification error:', error.message);
+  //     return errorResponse(error.message);
+  //   }
+  // }
 
   @Get('status/:paymentId')
   @UseGuards(JwtAuthGuard)
