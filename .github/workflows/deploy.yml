@@ -32,5 +32,5 @@ jobs:
         run: |
           curl -X POST -H "Content-Type: application/json" \
           -d '{
-            "content": "**:white_check_mark: Skinora Backend deployed successfully to server!** :rocket:"
+            "content": "<@&1385529547281403966> **:white_check_mark: Skinora Backend deployed successfully to server!** :rocket:"
           }' ${{ secrets.DISCORD_WEBHOOK_URL }}

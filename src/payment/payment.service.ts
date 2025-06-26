@@ -125,12 +125,26 @@ export class PaymentService {
       if (existing) {
         return { success: true, message: 'Already processed' };
       }
-      // Mapping nâng cao: tìm payment theo orderCode (nội dung chuyển khoản), số tiền, trạng thái pending
-      const payment = await this.paymentModel.findOne({
-        orderCode: webhookData.content, // content là nội dung chuyển khoản user nhập
-        amount: webhookData.transferAmount,
-        status: 'pending',
-      });
+      // Mapping nâng cao: tìm payment theo orderCode từ code hoặc nằm trong content, số tiền, trạng thái pending
+      const orderCode = webhookData.code || '';
+      let payment: PaymentDocument | null = null;
+      if (orderCode) {
+        payment = await this.paymentModel.findOne({
+          orderCode: orderCode,
+          amount: webhookData.transferAmount,
+          status: 'pending',
+        });
+      }
+      if (!payment) {
+        const content = webhookData.content || '';
+        if (content) {
+          payment = await this.paymentModel.findOne({
+            orderCode: { $regex: new RegExp(orderCode || content, 'i') },
+            amount: webhookData.transferAmount,
+            status: 'pending',
+          });
+        }
+      }
       if (!payment) {
         throw new NotFoundException('Payment not found for webhook');
       }
