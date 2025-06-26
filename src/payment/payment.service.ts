@@ -146,7 +146,28 @@ export class PaymentService {
         }
       }
       if (!payment) {
-        throw new NotFoundException('Payment not found for webhook');
+        // Nếu không tìm thấy payment, tự tạo mới với trạng thái completed
+        const newPayment = new this.paymentModel({
+          userId: null, // Không xác định được user
+          subscriptionId: null, // Không xác định được subscription
+          amount: webhookData.transferAmount,
+          currency: 'VND',
+          status: webhookData.transferType === 'in' ? 'completed' : 'pending',
+          paymentMethod: 'sepay',
+          description:
+            webhookData.description || 'Auto-created from SePay webhook',
+          paidAt:
+            webhookData.transferType === 'in'
+              ? new Date(webhookData.transactionDate)
+              : null,
+          orderCode: webhookData.code || '',
+          sepayId: webhookData.id,
+          sepayReferenceCode: webhookData.referenceCode,
+          sepayWebhook: webhookData,
+        });
+        await newPayment.save();
+        // (Tùy chọn) Gửi thông báo cho admin tại đây
+        return { success: true, message: 'Auto-created payment from webhook' };
       }
       payment.status =
         webhookData.transferType === 'in' ? 'completed' : 'pending';
