@@ -98,9 +98,9 @@ export class PaymentService {
         description: savedPayment.description,
         subscriptionId: (subscription as any)._id,
         orderCode: savedPayment.orderCode,
-        bankAccount: '0123456789', // Thay bằng số tài khoản nhận thật
-        bankName: 'Vietcombank', // Thay bằng tên ngân hàng thật
-        accountName: 'CONG TY ABC', // Thay bằng tên chủ tài khoản thật
+        bankAccount: '0908705620', // Thay bằng số tài khoản nhận thật
+        bankName: 'MB', // Thay bằng tên ngân hàng thật
+        accountName: 'PHAM NGUYEN VU', // Thay bằng tên chủ tài khoản thật
         transferContent: savedPayment.orderCode, // FE sẽ hiển thị nội dung này cho user copy khi chuyển khoản
       };
     } catch (error) {
