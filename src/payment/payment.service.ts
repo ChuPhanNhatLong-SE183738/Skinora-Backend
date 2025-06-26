@@ -92,6 +92,19 @@ export class PaymentService {
       });
       const savedPayment = await payment.save();
       // Trả về thông tin tài khoản nhận, nội dung chuyển khoản cho FE
+
+      console.log('Payment: ', {
+        paymentId: savedPayment._id,
+        amount: subscription.totalAmount,
+        description: savedPayment.description,
+        subscriptionId: (subscription as any)._id,
+        orderCode: savedPayment.orderCode,
+        bankAccount: '0908705620', // Thay bằng số tài khoản nhận thật
+        bankName: 'MB', // Thay bằng tên ngân hàng thật
+        accountName: 'PHAM NGUYEN VU', // Thay bằng tên chủ tài khoản thật
+        transferContent: savedPayment.orderCode, // FE sẽ hiển thị nội dung này cho user copy khi chuyển khoản
+      });
+
       return {
         paymentId: savedPayment._id,
         amount: subscription.totalAmount,
