@@ -248,7 +248,7 @@ export class PaymentService {
     console.log('🔍 Getting payment for orderCode:', orderCode);
 
     const payment = await this.paymentModel
-      .findOne({ sepayId: orderCode })
+      .findOne({ orderCode: orderCode })
       .populate('subscriptionId')
       .populate('userId', 'fullName email')
       .exec();
