@@ -20,6 +20,7 @@ import { ChatMessagesModule } from './chat_messages/chat_messages.module';
 import { ChatHistoryModule } from './chat_history/chat_history.module';
 import { WebSocketModule } from './websocket/websocket.module';
 import { CallModule } from './call/call.module';
+import { FeedbackModule } from './feedback/feedback.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { CallModule } from './call/call.module';
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/uploads',
     }),
+    FeedbackModule,
   ],
 })
 export class AppModule {}
