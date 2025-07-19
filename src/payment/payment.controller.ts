@@ -173,6 +173,127 @@ export class PaymentController {
     }
   }
 
+  @Get('list')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get list of all payments with pagination and search' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payments retrieved successfully',
+  })
+  async getAllPayments(
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+  ) {
+    try {
+      const pageNum = parseInt(page, 10) || 1;
+      const limitNum = parseInt(limit, 10) || 10;
+      
+      const result = await this.paymentService.getAllPayments(
+        pageNum,
+        limitNum,
+        status,
+        search,
+      );
+      return successResponse(result, 'Payments retrieved successfully');
+    } catch (error) {
+      return errorResponse(error.message);
+    }
+  }
+
+  @Get('user/list')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get list of payments for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'User payments retrieved successfully',
+  })
+  async getUserPayments(
+    @Request() req,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+  ) {
+    try {
+      const userId = req.user.sub || req.user.id;
+      const pageNum = parseInt(page, 10) || 1;
+      const limitNum = parseInt(limit, 10) || 10;
+      
+      const result = await this.paymentService.getPaymentsByUserId(
+        userId,
+        pageNum,
+        limitNum,
+      );
+      return successResponse(result, 'User payments retrieved successfully');
+    } catch (error) {
+      return errorResponse(error.message);
+    }
+  }
+
+  @Get('details/:paymentId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get payment details by ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment details retrieved successfully',
+  })
+  async getPaymentById(@Param('paymentId') paymentId: string) {
+    try {
+      const payment = await this.paymentService.getPaymentById(paymentId);
+      return successResponse(payment, 'Payment details retrieved successfully');
+    } catch (error) {
+      return errorResponse(error.message);
+    }
+  }
+
+  @Get('status-filter/:status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get payments by status' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payments filtered by status retrieved successfully',
+  })
+  async getPaymentsByStatus(
+    @Param('status') status: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+  ) {
+    try {
+      const pageNum = parseInt(page, 10) || 1;
+      const limitNum = parseInt(limit, 10) || 10;
+      
+      const result = await this.paymentService.getPaymentsByStatus(
+        status,
+        pageNum,
+        limitNum,
+      );
+      return successResponse(result, 'Payments filtered by status retrieved successfully');
+    } catch (error) {
+      return errorResponse(error.message);
+    }
+  }
+
+  @Get('statistics')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get payment statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment statistics retrieved successfully',
+  })
+  async getPaymentStatistics() {
+    try {
+      const statistics = await this.paymentService.getPaymentStatistics();
+      return successResponse(statistics, 'Payment statistics retrieved successfully');
+    } catch (error) {
+      return errorResponse(error.message);
+    }
+  }
+
   //   @Post('refresh/:orderCode')
   //   @ApiOperation({ summary: 'Refresh payment status and sync with PayOS' })
   //   async refreshPaymentStatus(@Param('orderCode') orderCode: string) {
@@ -211,3 +332,5 @@ export class PaymentController {
   //     }
   //   }
 }
+
+

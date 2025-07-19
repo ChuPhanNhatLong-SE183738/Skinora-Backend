@@ -80,7 +80,7 @@ export class PaymentService {
       // Tạo payment record
       const payment = new this.paymentModel({
         userId,
-        subscriptionId: (subscription as any)._id,
+        subscriptionId: subscription._id,
         amount: subscription.totalAmount,
         currency: 'VND',
         status: 'pending',
@@ -97,7 +97,7 @@ export class PaymentService {
         paymentId: savedPayment._id,
         amount: subscription.totalAmount,
         description: savedPayment.description,
-        subscriptionId: (subscription as any)._id,
+        subscriptionId: subscription._id,
         orderCode: savedPayment.orderCode,
         bankAccount: '0908705620', // Thay bằng số tài khoản nhận thật
         bankName: 'MB', // Thay bằng tên ngân hàng thật
@@ -109,7 +109,7 @@ export class PaymentService {
         paymentId: savedPayment._id,
         amount: subscription.totalAmount,
         description: savedPayment.description,
-        subscriptionId: (subscription as any)._id,
+        subscriptionId: subscription._id,
         orderCode: savedPayment.orderCode,
         bankAccount: '0908705620', // Thay bằng số tài khoản nhận thật
         bankName: 'MB', // Thay bằng tên ngân hàng thật
@@ -291,6 +291,138 @@ export class PaymentService {
       paymentStatus: payment ? payment.status : 'no_payment',
       paymentId: payment ? payment._id : null,
       isActive: subscription.status === 'active',
+    };
+  }
+
+  async getAllPayments(page: number = 1, limit: number = 10, status?: string, search?: string) {
+    const skip = (page - 1) * limit;
+    const filter: any = {};
+
+    if (status) {
+      filter.status = status;
+    }
+
+    // Add search functionality
+    if (search) {
+      filter.$or = [
+        { description: { $regex: search, $options: 'i' } },
+        { paymentId: { $regex: search, $options: 'i' } },
+      ];
+
+      // If search term looks like a MongoDB ObjectId, also search by _id
+      if (search.match(/^[0-9a-fA-F]{24}$/)) {
+        filter.$or.push({ _id: search });
+      }
+    }
+
+    const payments = await this.paymentModel
+      .find(filter)
+      .populate('subscriptionId')
+      .populate('userId', 'fullName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const total = await this.paymentModel.countDocuments(filter);
+
+    return {
+      payments,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getPaymentsByUserId(userId: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const payments = await this.paymentModel
+      .find({ userId })
+      .populate('subscriptionId')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const total = await this.paymentModel.countDocuments({ userId });
+
+    return {
+      payments,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getPaymentById(paymentId: string) {
+    const payment = await this.paymentModel
+      .findById(paymentId)
+      .populate('subscriptionId')
+      .populate('userId', 'fullName email')
+      .exec();
+
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+
+    return payment;
+  }
+
+  async getPaymentsByStatus(status: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+
+    const payments = await this.paymentModel
+      .find({ status })
+      .populate('subscriptionId')
+      .populate('userId', 'fullName email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .exec();
+
+    const total = await this.paymentModel.countDocuments({ status });
+
+    return {
+      payments,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getPaymentStatistics() {
+    const totalPayments = await this.paymentModel.countDocuments();
+    const completedPayments = await this.paymentModel.countDocuments({
+      status: 'completed',
+    });
+    const pendingPayments = await this.paymentModel.countDocuments({
+      status: 'pending',
+    });
+    const failedPayments = await this.paymentModel.countDocuments({
+      status: 'failed',
+    });
+
+    const totalRevenue = await this.paymentModel.aggregate([
+      { $match: { status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
+    ]);
+
+    return {
+      totalPayments,
+      completedPayments,
+      pendingPayments,
+      failedPayments,
+      totalRevenue: totalRevenue[0]?.total || 0,
     };
   }
 }
