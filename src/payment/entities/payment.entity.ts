@@ -5,8 +5,8 @@ export type PaymentDocument = Payment & Document;
 
 @Schema({ timestamps: true })
 export class Payment {
-  @Prop({ required: true })
-  userId: string;
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  userId: Types.ObjectId;
 
   @Prop({ type: Types.ObjectId, ref: 'Subscription', required: true })
   subscriptionId: Types.ObjectId;

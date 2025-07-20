@@ -184,8 +184,8 @@ export class PaymentController {
   async getAllPayments(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
-    @Query('status') status?: string,
-    @Query('search') search?: string,
+    // @Query('status') status?: string,
+    // @Query('search') search?: string,
   ) {
     try {
       const pageNum = parseInt(page, 10) || 1;
@@ -194,8 +194,8 @@ export class PaymentController {
       const result = await this.paymentService.getAllPayments(
         pageNum,
         limitNum,
-        status,
-        search,
+        // status,
+        // search,
       );
       return successResponse(result, 'Payments retrieved successfully');
     } catch (error) {

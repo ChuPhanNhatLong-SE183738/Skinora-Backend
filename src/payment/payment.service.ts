@@ -77,9 +77,13 @@ export class PaymentService {
         const existing = await this.paymentModel.findOne({ orderCode });
         if (!existing) isUnique = true;
       }
+
+      const userIdObjId = new Types.ObjectId(userId);
+      console.log('Creating payment for user:', userIdObjId);
+
       // Tạo payment record
       const payment = new this.paymentModel({
-        userId,
+        userId: userIdObjId,
         subscriptionId: subscription._id,
         amount: subscription.totalAmount,
         currency: 'VND',
@@ -90,6 +94,7 @@ export class PaymentService {
           `Payment for ${subscription.planName}`,
         orderCode: orderCode || '', // Đảm bảo orderCode luôn có giá trị
       });
+
       const savedPayment = await payment.save();
       // Trả về thông tin tài khoản nhận, nội dung chuyển khoản cho FE
 
