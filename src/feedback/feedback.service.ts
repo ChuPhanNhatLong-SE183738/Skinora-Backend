@@ -17,7 +17,9 @@ export class FeedbackService {
     private feedbackModel: Model<FeedbackDocument>,
   ) {}
 
-  async create(createFeedbackDto: CreateFeedbackDto): Promise<FeedbackDocument> {
+  async create(
+    createFeedbackDto: CreateFeedbackDto,
+  ): Promise<FeedbackDocument> {
     try {
       const feedback = new this.feedbackModel({
         ...createFeedbackDto,
@@ -25,7 +27,9 @@ export class FeedbackService {
       });
       return await feedback.save();
     } catch (error) {
-      throw new BadRequestException(`Failed to create feedback: ${error.message}`);
+      throw new BadRequestException(
+        `Failed to create feedback: ${error.message}`,
+      );
     }
   }
 
@@ -57,7 +61,7 @@ export class FeedbackService {
 
     return await this.feedbackModel
       .find(query)
-      .populate('userId', 'fullName email profilePicture')
+      .populate('userId', 'fullName email avatarUrl')
       .sort({ createdAt: -1 })
       .exec();
   }
@@ -103,7 +107,10 @@ export class FeedbackService {
     const existingFeedback = await this.findOne(id);
 
     // Check if the requesting user is the owner of the feedback
-    if (requestingUserId && existingFeedback.userId.toString() !== requestingUserId) {
+    if (
+      requestingUserId &&
+      existingFeedback.userId.toString() !== requestingUserId
+    ) {
       throw new ForbiddenException('You can only update your own feedback');
     }
 
@@ -116,7 +123,7 @@ export class FeedbackService {
             userId: new Types.ObjectId(updateFeedbackDto.userId),
           }),
         },
-        { new: true }
+        { new: true },
       )
       .populate('userId', 'fullName email profilePicture')
       .exec();
@@ -128,7 +135,10 @@ export class FeedbackService {
     return updatedFeedback;
   }
 
-  async remove(id: string, requestingUserId?: string): Promise<{ deleted: boolean }> {
+  async remove(
+    id: string,
+    requestingUserId?: string,
+  ): Promise<{ deleted: boolean }> {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('Invalid feedback ID format');
     }
@@ -136,7 +146,10 @@ export class FeedbackService {
     const existingFeedback = await this.findOne(id);
 
     // Check if the requesting user is the owner of the feedback
-    if (requestingUserId && existingFeedback.userId.toString() !== requestingUserId) {
+    if (
+      requestingUserId &&
+      existingFeedback.userId.toString() !== requestingUserId
+    ) {
       throw new ForbiddenException('You can only delete your own feedback');
     }
 
@@ -149,7 +162,10 @@ export class FeedbackService {
     return { deleted: true };
   }
 
-  async getAverageRating(): Promise<{ averageRating: number; totalFeedbacks: number }> {
+  async getAverageRating(): Promise<{
+    averageRating: number;
+    totalFeedbacks: number;
+  }> {
     const result = await this.feedbackModel.aggregate([
       {
         $group: {

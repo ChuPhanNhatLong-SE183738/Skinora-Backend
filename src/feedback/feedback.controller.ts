@@ -32,6 +32,30 @@ import { Role } from '../users/enums/role.enum';
 export class FeedbackController {
   constructor(private readonly feedbackService: FeedbackService) {}
 
+  @Get('/get-all-feedbacks')
+  @UseGuards(JwtAuthGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Retrieve all feedback',
+    description: 'Get a list of all feedback submissions',
+  })
+  async getAllFeedbacks() {
+    try {
+      const feedback = await this.feedbackService.findAll();
+      return {
+        success: true,
+        message: 'Feedback retrieved successfully',
+        data: feedback,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -47,7 +71,8 @@ export class FeedbackController {
         summary: 'Positive feedback',
         value: {
           userId: '507f1f77bcf86cd799439012',
-          content: 'Great service! The doctor was very professional and helpful.',
+          content:
+            'Great service! The doctor was very professional and helpful.',
           rating: 5,
         },
       },
@@ -63,7 +88,8 @@ export class FeedbackController {
         data: {
           _id: '507f1f77bcf86cd799439015',
           userId: '507f1f77bcf86cd799439012',
-          content: 'Great service! The doctor was very professional and helpful.',
+          content:
+            'Great service! The doctor was very professional and helpful.',
           rating: 5,
           createdAt: '2025-07-14T10:00:00.000Z',
           updatedAt: '2025-07-14T10:00:00.000Z',
@@ -72,7 +98,10 @@ export class FeedbackController {
     },
   })
   @ApiResponse({ status: 400, description: 'Bad request - Invalid data' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   async create(@Body() createFeedbackDto: CreateFeedbackDto) {
     try {
       const feedback = await this.feedbackService.create(createFeedbackDto);
@@ -92,7 +121,8 @@ export class FeedbackController {
   @Get()
   @ApiOperation({
     summary: 'Get all feedback with optional filtering',
-    description: 'Retrieve all feedback with optional filters for user, rating, etc.',
+    description:
+      'Retrieve all feedback with optional filters for user, rating, etc.',
   })
   @ApiQuery({
     name: 'userId',
@@ -217,7 +247,10 @@ export class FeedbackController {
     description: 'User feedback retrieved successfully',
   })
   @ApiResponse({ status: 400, description: 'Bad request - Invalid user ID' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
   async findByUser(@Param('userId') userId: string) {
     try {
       const feedback = await this.feedbackService.findByUser(userId);
@@ -249,7 +282,10 @@ export class FeedbackController {
     status: 200,
     description: 'Feedback found and returned successfully',
   })
-  @ApiResponse({ status: 400, description: 'Bad request - Invalid feedback ID' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid feedback ID',
+  })
   @ApiResponse({ status: 404, description: 'Feedback not found' })
   async findOne(@Param('id') id: string) {
     try {
@@ -272,7 +308,8 @@ export class FeedbackController {
   @ApiBearerAuth()
   @ApiOperation({
     summary: 'Update feedback',
-    description: 'Update feedback content and/or rating. Users can only update their own feedback.',
+    description:
+      'Update feedback content and/or rating. Users can only update their own feedback.',
   })
   @ApiParam({
     name: 'id',
@@ -296,9 +333,18 @@ export class FeedbackController {
     status: 200,
     description: 'Feedback updated successfully',
   })
-  @ApiResponse({ status: 400, description: 'Bad request - Invalid data or feedback ID' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Can only update own feedback' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid data or feedback ID',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Can only update own feedback',
+  })
   @ApiResponse({ status: 404, description: 'Feedback not found' })
   async update(
     @Param('id') id: string,
@@ -347,9 +393,18 @@ export class FeedbackController {
       },
     },
   })
-  @ApiResponse({ status: 400, description: 'Bad request - Invalid feedback ID' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid or missing token' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Can only delete own feedback' })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid feedback ID',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing token',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Can only delete own feedback',
+  })
   @ApiResponse({ status: 404, description: 'Feedback not found' })
   async remove(@Param('id') id: string, @Request() req: any) {
     try {
